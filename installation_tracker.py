@@ -825,8 +825,8 @@ class InstallationTracker:
 
         return result
 
-    def scan_all(self) -> Dict[str, Any]:
-        """Scan for all known tools."""
+    def scan_all(self, tools: List[str] = None) -> Dict[str, Any]:
+        """Scan for specified tools or all known tools if none specified."""
         user_info = self._get_machine_user_info()
         self.results = {
             "scan_timestamp": datetime.now().isoformat(),
@@ -838,10 +838,78 @@ class InstallationTracker:
             "tools": {}
         }
 
-        for tool_name in TOOL_CONFIGS:
-            self.results["tools"][tool_name] = self.scan_tool(tool_name)
+        # Use provided tools list or default to all configured tools
+        tools_to_scan = tools if tools else list(TOOL_CONFIGS.keys())
+
+        for tool_name in tools_to_scan:
+            if tool_name in TOOL_CONFIGS:
+                self.results["tools"][tool_name] = self.scan_tool(tool_name)
+            else:
+                # For custom tools not in TOOL_CONFIGS, create a generic config
+                self.results["tools"][tool_name] = self.scan_custom_tool(tool_name)
 
         return self.results
+
+    def scan_custom_tool(self, tool_name: str) -> Dict[str, Any]:
+        """Scan for a custom tool using generic paths based on tool name."""
+        # Generate generic config paths based on tool name
+        generic_config = {
+            "config_paths": [
+                f"~/.{tool_name}/config.json",
+                f"~/.{tool_name}/config.yaml",
+                f"~/.{tool_name}/config.yml",
+                f"~/.{tool_name}/{tool_name}.json",
+                f"~/.{tool_name}/{tool_name}.yaml",
+                f"~/.{tool_name}/{tool_name}.yml",
+                f"~/.config/{tool_name}/config.json",
+                f"~/.config/{tool_name}/config.yaml",
+                f"~/.config/{tool_name}/config.yml",
+                f"/etc/{tool_name}/config.yaml",
+                f"/etc/{tool_name}/config.yml",
+            ],
+            "log_paths": [
+                f"~/.{tool_name}/logs/*.log",
+                f"~/.{tool_name}/*.log",
+                f"/var/log/{tool_name}/*.log",
+            ],
+            "workspace_path": f"~/.{tool_name}/workspace",
+            "process_names": [tool_name, f"{tool_name}-agent", f"{tool_name}-daemon", f"{tool_name}-server"],
+            "default_port": None,
+            "binary_names": [tool_name],
+        }
+
+        # Temporarily add to TOOL_CONFIGS
+        TOOL_CONFIGS[tool_name] = generic_config
+        result = self.scan_tool(tool_name)
+        # Remove after scanning
+        del TOOL_CONFIGS[tool_name]
+
+        return result
+
+    def add_custom_tool(self, tool_name: str, config: Dict[str, Any] = None):
+        """Add a custom tool configuration."""
+        if config:
+            TOOL_CONFIGS[tool_name] = config
+        else:
+            # Use generic config
+            TOOL_CONFIGS[tool_name] = {
+                "config_paths": [
+                    f"~/.{tool_name}/config.json",
+                    f"~/.{tool_name}/config.yaml",
+                    f"~/.{tool_name}/config.yml",
+                    f"~/.config/{tool_name}/config.json",
+                    f"~/.config/{tool_name}/config.yaml",
+                ],
+                "log_paths": [
+                    f"~/.{tool_name}/logs/*.log",
+                    f"~/.{tool_name}/*.log",
+                    f"/var/log/{tool_name}/*.log",
+                ],
+                "workspace_path": f"~/.{tool_name}/workspace",
+                "process_names": [tool_name, f"{tool_name}-agent", f"{tool_name}-daemon"],
+                "default_port": None,
+                "binary_names": [tool_name],
+            }
 
     def generate_report(self) -> str:
         """Generate a human-readable report."""
@@ -968,7 +1036,28 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Track clawbot/moltbot/openclaw installations"
+        description="Track tool installations (clawbot/moltbot/openclaw and custom tools)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Scan default tools (openclaw, moltbot, clawbot)
+  python installation_tracker.py
+
+  # Scan specific tools from the default list
+  python installation_tracker.py --tools openclaw moltbot
+
+  # Scan custom tools (will use generic paths based on tool name)
+  python installation_tracker.py --tools mytool anothertool
+
+  # Mix default and custom tools
+  python installation_tracker.py --tools openclaw mytool custombot
+
+  # Output as JSON
+  python installation_tracker.py --tools openclaw --json
+
+  # Save to file
+  python installation_tracker.py --tools openclaw moltbot -o report.json --json
+        """
     )
     parser.add_argument(
         "--api-key",
@@ -987,21 +1076,57 @@ def main():
     )
     parser.add_argument(
         "--tool",
-        choices=["openclaw", "moltbot", "clawbot"],
-        help="Scan only a specific tool"
+        help="Scan only a specific tool (deprecated, use --tools instead)"
+    )
+    parser.add_argument(
+        "--tools",
+        "-t",
+        nargs="+",
+        help="List of tools to scan (e.g., --tools openclaw moltbot mytool)"
+    )
+    parser.add_argument(
+        "--list-tools",
+        action="store_true",
+        help="List all predefined tools and exit"
     )
 
     args = parser.parse_args()
 
+    # Handle --list-tools
+    if args.list_tools:
+        print("Predefined tools:")
+        for tool_name, config in TOOL_CONFIGS.items():
+            print(f"  {tool_name}:")
+            print(f"    Port: {config.get('default_port', 'N/A')}")
+            print(f"    Processes: {', '.join(config.get('process_names', []))}")
+        print("\nYou can also specify custom tool names with --tools")
+        return
+
     tracker = InstallationTracker(api_key=args.api_key)
 
-    if args.tool:
-        result = tracker.scan_tool(args.tool)
+    # Determine which tools to scan
+    tools_to_scan = None
+    if args.tools:
+        tools_to_scan = args.tools
+    elif args.tool:
+        tools_to_scan = [args.tool]
+
+    # Perform scan
+    if tools_to_scan and len(tools_to_scan) == 1:
+        # Single tool scan
+        tool_name = tools_to_scan[0]
+        if tool_name in TOOL_CONFIGS:
+            result = tracker.scan_tool(tool_name)
+        else:
+            result = tracker.scan_custom_tool(tool_name)
         output = json.dumps(result, indent=2, default=str)
-    elif args.json:
-        output = tracker.export_json()
     else:
-        output = tracker.generate_report()
+        # Multiple tools or all tools
+        tracker.scan_all(tools=tools_to_scan)
+        if args.json:
+            output = tracker.export_json()
+        else:
+            output = tracker.generate_report()
 
     if args.output:
         with open(args.output, "w") as f:
