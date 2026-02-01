@@ -1150,14 +1150,92 @@ class InstallationTracker:
 
         return skills
 
+    def _parse_tools_md(self, tools_md_path: str) -> List[Dict[str, Any]]:
+        """Parse a TOOLS.md file for user-defined integrations/tools.
+
+        TOOLS.md contains user-specific notes about:
+        - Cameras, SSH hosts, TTS voices, speakers
+        - Device nicknames, custom configurations
+        - Environment-specific settings
+        """
+        integrations = []
+
+        if not os.path.exists(tools_md_path):
+            return integrations
+
+        try:
+            with open(tools_md_path, 'r') as f:
+                content = f.read()
+
+            # Parse markdown sections for integrations
+            current_section = None
+            section_items = []
+
+            for line in content.split('\n'):
+                line = line.strip()
+
+                # Detect section headers (### Cameras, ### SSH, etc.)
+                if line.startswith('###'):
+                    # Save previous section
+                    if current_section and section_items:
+                        for item in section_items:
+                            integrations.append({
+                                "name": item.get("name", "unknown"),
+                                "type": current_section.lower(),
+                                "source": "TOOLS.md",
+                                "description": item.get("description", ""),
+                                "details": item
+                            })
+                    current_section = line.lstrip('#').strip()
+                    section_items = []
+
+                # Parse list items (- name → description)
+                elif line.startswith('-') and current_section:
+                    item_text = line.lstrip('- ').strip()
+                    if '→' in item_text:
+                        name, desc = item_text.split('→', 1)
+                        section_items.append({
+                            "name": name.strip(),
+                            "description": desc.strip()
+                        })
+                    elif ':' in item_text:
+                        name, desc = item_text.split(':', 1)
+                        section_items.append({
+                            "name": name.strip(),
+                            "description": desc.strip()
+                        })
+                    else:
+                        section_items.append({
+                            "name": item_text,
+                            "description": ""
+                        })
+
+            # Don't forget last section
+            if current_section and section_items:
+                for item in section_items:
+                    integrations.append({
+                        "name": item.get("name", "unknown"),
+                        "type": current_section.lower(),
+                        "source": "TOOLS.md",
+                        "description": item.get("description", ""),
+                        "details": item
+                    })
+
+        except IOError:
+            pass
+
+        return integrations
+
     def _scan_workspace_library(self, tool_name: str) -> Dict[str, Any]:
         """Scan the workspace library for connected apps and integrations.
 
         Scans:
+        - TOOLS.md for user-defined integrations
         - skills/ directory for installed skills
         - extensions/ directory for installed extensions
         - plugins/ directory for installed plugins
         - channels from config (telegram, slack, discord, etc.)
+        - skills.entries from config for configured skills
         - MCP servers configuration
         - OAuth credentials
         """
@@ -1165,10 +1243,12 @@ class InstallationTracker:
             "connected_apps": [],
             "channels": [],
             "skills": [],
+            "skills_from_config": [],
             "extensions": [],
             "plugins": [],
             "mcp_servers": [],
             "oauth_credentials": [],
+            "tools_md_integrations": [],
         }
 
         # Check multiple possible workspace locations
@@ -1183,6 +1263,19 @@ class InstallationTracker:
             ws_path = self._expand_path(ws_dir)
             if not os.path.exists(ws_path):
                 continue
+
+            # Parse TOOLS.md for user-defined integrations
+            tools_md_path = os.path.join(ws_path, "TOOLS.md")
+            if os.path.exists(tools_md_path):
+                tools_integrations = self._parse_tools_md(tools_md_path)
+                result["tools_md_integrations"].extend(tools_integrations)
+                for intg in tools_integrations:
+                    result["connected_apps"].append({
+                        "name": intg["name"],
+                        "type": f"tools_md_{intg['type']}",
+                        "source": tools_md_path,
+                        "details": intg
+                    })
 
             # Scan skills directory
             skills_path = os.path.join(ws_path, "skills")
@@ -1301,13 +1394,32 @@ class InstallationTracker:
                         # Extract skills entries from config
                         skills_config = config_data.get("skills", {}).get("entries", {})
                         for skill_name, skill_config in skills_config.items():
+                            skill_info = {
+                                "name": skill_name,
+                                "enabled": skill_config.get("enabled", True),
+                                "has_api_key": bool(skill_config.get("apiKey")),
+                                "has_env": bool(skill_config.get("env")),
+                                "has_config": bool(skill_config.get("config")),
+                                "source": config_path,
+                            }
+                            result["skills_from_config"].append(skill_info)
                             if skill_config.get("enabled", True):
                                 result["connected_apps"].append({
                                     "name": skill_name,
                                     "type": "skill_config",
                                     "source": config_path,
-                                    "details": {"enabled": True, "has_api_key": bool(skill_config.get("apiKey"))}
+                                    "details": skill_info
                                 })
+
+                        # Extract bundled skills allowlist
+                        bundled_skills = config_data.get("skills", {}).get("allowBundled", [])
+                        for skill_name in bundled_skills:
+                            result["connected_apps"].append({
+                                "name": skill_name,
+                                "type": "bundled_skill",
+                                "source": config_path,
+                                "details": {"allowed": True}
+                            })
 
         return result
 
@@ -1858,6 +1970,36 @@ class InstallationTracker:
                 lines.append(f"  OAUTH CREDENTIALS ({len(ws_lib['oauth_credentials'])}):")
                 for cred in ws_lib["oauth_credentials"]:
                     lines.append(f"    - {cred['provider']} (has_token: {cred['has_token']})")
+
+            # Show TOOLS.md integrations
+            if ws_lib.get("tools_md_integrations"):
+                lines.append("")
+                lines.append(f"  TOOLS.MD INTEGRATIONS ({len(ws_lib['tools_md_integrations'])}):")
+                by_type = {}
+                for intg in ws_lib["tools_md_integrations"]:
+                    intg_type = intg.get("type", "unknown")
+                    if intg_type not in by_type:
+                        by_type[intg_type] = []
+                    by_type[intg_type].append(intg)
+                for intg_type, items in by_type.items():
+                    lines.append(f"    [{intg_type}]:")
+                    for item in items:
+                        desc = f" → {item['description']}" if item.get('description') else ""
+                        lines.append(f"      - {item['name']}{desc}")
+
+            # Show skills from config entries
+            if ws_lib.get("skills_from_config"):
+                lines.append("")
+                lines.append(f"  SKILLS FROM CONFIG ({len(ws_lib['skills_from_config'])}):")
+                for skill in ws_lib["skills_from_config"]:
+                    status = "enabled" if skill.get("enabled", True) else "disabled"
+                    extras = []
+                    if skill.get("has_api_key"):
+                        extras.append("has API key")
+                    if skill.get("has_env"):
+                        extras.append("has env vars")
+                    extra_str = f" ({', '.join(extras)})" if extras else ""
+                    lines.append(f"    - {skill['name']} [{status}]{extra_str}")
 
             if ws_lib.get("connected_apps"):
                 lines.append("")
