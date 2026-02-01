@@ -1174,8 +1174,8 @@ class InstallationTracker:
             for line in content.split('\n'):
                 line = line.strip()
 
-                # Detect section headers (### Cameras, ### SSH, etc.)
-                if line.startswith('###'):
+                # Detect section headers (## or ### Cameras, SSH, etc.)
+                if line.startswith('##') and not line.startswith('#####'):
                     # Save previous section
                     if current_section and section_items:
                         for item in section_items:
