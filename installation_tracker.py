@@ -70,11 +70,21 @@ KNOWN_SERVICES = {
 
     # Communication
     "slack": {"name": "Slack", "category": "Communication"},
+    "slack.com": {"name": "Slack", "category": "Communication"},
+    "hooks.slack.com": {"name": "Slack Webhook", "category": "Communication"},
     "discord": {"name": "Discord", "category": "Communication"},
+    "discord.com": {"name": "Discord", "category": "Communication"},
+    "discordapp.com": {"name": "Discord", "category": "Communication"},
     "telegram": {"name": "Telegram", "category": "Communication"},
+    "telegram.org": {"name": "Telegram", "category": "Communication"},
+    "api.telegram.org": {"name": "Telegram Bot API", "category": "Communication"},
+    "t.me": {"name": "Telegram Link", "category": "Communication"},
+    "core.telegram.org": {"name": "Telegram Core", "category": "Communication"},
     "twilio": {"name": "Twilio", "category": "Communication"},
     "sendgrid": {"name": "SendGrid", "category": "Communication"},
     "mailgun": {"name": "Mailgun", "category": "Communication"},
+    "whatsapp": {"name": "WhatsApp", "category": "Communication"},
+    "signal": {"name": "Signal", "category": "Communication"},
 
     # Authentication
     "auth0": {"name": "Auth0", "category": "Authentication"},
@@ -555,8 +565,24 @@ class InstallationTracker:
             (r'(?:database|db)\s+(?:connection|host)["\s:=]+["\']?([^\s"\']+)["\']?', "database"),
 
             # Service-specific
-            (r'(?:github|gitlab|bitbucket)\.com/([^\s"\']+)', "vcs"),
-            (r'(?:slack|discord|telegram)(?:\.com)?(?:/|:)([^\s"\']+)', "messaging"),
+            (r'(?:github|gitlab|bitbucket)\.com[/:]?([^\s"\']*)', "vcs"),
+
+            # Messaging services - improved patterns
+            (r'(api\.telegram\.org[^\s"\']*)', "telegram"),
+            (r'(telegram\.org[^\s"\']*)', "telegram"),
+            (r'(t\.me[/][^\s"\']*)', "telegram"),
+            (r'telegram["\s:=]+["\']?([^\s"\']+)["\']?', "telegram"),
+            (r'(slack\.com[^\s"\']*)', "slack"),
+            (r'(hooks\.slack\.com[^\s"\']*)', "slack"),
+            (r'(discord\.com[^\s"\']*)', "discord"),
+            (r'(discordapp\.com[^\s"\']*)', "discord"),
+            (r'(?:slack|discord|telegram)(?:_|-)(?:bot|api|webhook|token|key)["\s:=]+["\']?([^\s"\']+)["\']?', "messaging_config"),
+            (r'(?:send|post|message)(?:ing|ed)?\s+(?:to\s+)?(?:telegram|slack|discord)[^\s]*["\']?([^\s"\']*)["\']?', "messaging"),
+
+            # Bot tokens
+            (r'bot[_-]?token["\s:=]+["\']?([^\s"\']+)["\']?', "bot_token"),
+            (r'(\d+:[\w-]{35,})', "telegram_bot_token"),  # Telegram bot token format
+
             (r's3://([^\s"\']+)', "s3"),
             (r'(?:bucket|container)["\s:=]+["\']?([^\s"\']+)["\']?', "storage"),
 
@@ -1200,6 +1226,59 @@ class InstallationTracker:
 
         return sorted(apps_list, key=lambda x: x["access_count"], reverse=True)
 
+    def scan_log_files(self, log_file_patterns: List[str]) -> Dict[str, Any]:
+        """Scan specific log files directly for accessed apps/services."""
+        user_info = self._get_machine_user_info()
+
+        # Expand glob patterns and collect all log files
+        all_log_files = []
+        for pattern in log_file_patterns:
+            expanded = self._expand_path(pattern)
+            if '*' in expanded or '?' in expanded:
+                all_log_files.extend(glob.glob(expanded))
+            elif os.path.exists(expanded):
+                all_log_files.append(expanded)
+
+        # Remove duplicates and sort
+        all_log_files = sorted(set(all_log_files))
+
+        # Parse all log files
+        all_accessed_apps = []
+        all_connections = []
+
+        for log_file in all_log_files:
+            accessed = self._parse_log_for_accessed_apps(log_file)
+            all_accessed_apps.extend(accessed)
+
+            connections = self._parse_log_connections(log_file)
+            all_connections.extend(connections)
+
+        # Build results
+        self.results = {
+            "scan_timestamp": datetime.now().isoformat(),
+            "scan_type": "custom_log_files",
+            "machine_info": {
+                "hostname": self.hostname,
+                "api_key_provided": self.api_key[:4] + "****" if len(self.api_key) > 4 else "****",
+                "user": user_info,
+            },
+            "log_files_scanned": all_log_files,
+            "log_files_count": len(all_log_files),
+            "tools": {
+                "custom_logs": {
+                    "tool_name": "custom_logs",
+                    "installed": True,
+                    "active": True,
+                    "log_files": all_log_files,
+                    "connections": all_connections,
+                    "accessed_apps": all_accessed_apps,
+                    "accessed_apps_summary": self._aggregate_accessed_apps(all_accessed_apps),
+                }
+            }
+        }
+
+        return self.results
+
 
 def main():
     """Main entry point."""
@@ -1235,6 +1314,11 @@ Examples:
   # Simple list of accessed resources
   python installation_tracker.py --list-accessed
   python installation_tracker.py --list-accessed --json
+
+  # Scan specific log files directly
+  python installation_tracker.py --log-files /path/to/app.log
+  python installation_tracker.py --log-files /var/log/*.log ~/.myapp/logs/*.log
+  python installation_tracker.py --log-files /path/to/*.log --access-report
         """
     )
     parser.add_argument(
@@ -1277,6 +1361,12 @@ Examples:
         action="store_true",
         help="Output a simple list of accessed apps/servers"
     )
+    parser.add_argument(
+        "--log-files",
+        "-l",
+        nargs="+",
+        help="Scan specific log files directly (e.g., --log-files /path/to/app.log /var/log/*.log)"
+    )
 
     args = parser.parse_args()
 
@@ -1299,8 +1389,11 @@ Examples:
     elif args.tool:
         tools_to_scan = [args.tool]
 
-    # Perform scan first
-    tracker.scan_all(tools=tools_to_scan)
+    # Perform scan - either custom log files or tool-based
+    if args.log_files:
+        tracker.scan_log_files(args.log_files)
+    else:
+        tracker.scan_all(tools=tools_to_scan)
 
     # Generate appropriate output
     if args.access_report:
