@@ -95,6 +95,31 @@ KNOWN_SERVICES = {
     "teams.microsoft": {"name": "Microsoft Teams", "category": "Calendar"},
     "meet.google": {"name": "Google Meet", "category": "Calendar"},
 
+    # Note-taking / Knowledge Management
+    "obsidian": {"name": "Obsidian", "category": "Notes"},
+    "obsidian.md": {"name": "Obsidian", "category": "Notes"},
+    "sync.obsidian.md": {"name": "Obsidian Sync", "category": "Notes"},
+    "publish.obsidian.md": {"name": "Obsidian Publish", "category": "Notes"},
+    "api.obsidian.md": {"name": "Obsidian API", "category": "Notes"},
+    "roam": {"name": "Roam Research", "category": "Notes"},
+    "roamresearch": {"name": "Roam Research", "category": "Notes"},
+    "logseq": {"name": "Logseq", "category": "Notes"},
+    "evernote": {"name": "Evernote", "category": "Notes"},
+    "onenote": {"name": "OneNote", "category": "Notes"},
+    "bear": {"name": "Bear Notes", "category": "Notes"},
+    "craft": {"name": "Craft", "category": "Notes"},
+    "apple.notes": {"name": "Apple Notes", "category": "Notes"},
+    "standardnotes": {"name": "Standard Notes", "category": "Notes"},
+    "simplenote": {"name": "Simplenote", "category": "Notes"},
+    "joplin": {"name": "Joplin", "category": "Notes"},
+    "dendron": {"name": "Dendron", "category": "Notes"},
+    "remnote": {"name": "RemNote", "category": "Notes"},
+    "mem.ai": {"name": "Mem", "category": "Notes"},
+    "capacities": {"name": "Capacities", "category": "Notes"},
+    "anytype": {"name": "Anytype", "category": "Notes"},
+    "tana": {"name": "Tana", "category": "Notes"},
+    "coda": {"name": "Coda", "category": "Notes"},
+
     # Communication
     "slack": {"name": "Slack", "category": "Communication"},
     "slack.com": {"name": "Slack", "category": "Communication"},
@@ -669,6 +694,22 @@ class InstallationTracker:
             (r'(meet\.google\.com[^\s"\']*)', "google_meet"),
             (r'(?:create|add|sync|fetch)(?:ing|ed)?\s+(?:calendar|event|meeting|appointment)[^\s]*', "calendar_action"),
             (r'calendar[_-]?(?:id|api|key|token|secret)["\s:=]+["\']?([^\s"\']+)["\']?', "calendar_credential"),
+            (r'google[_-]?calendar["\s:=]+["\']?([^\s"\']+)["\']?', "google_calendar"),
+            (r'outlook[_-]?calendar["\s:=]+["\']?([^\s"\']+)["\']?', "outlook_calendar"),
+
+            # Obsidian and note-taking apps
+            (r'(obsidian\.md[^\s"\']*)', "obsidian"),
+            (r'(sync\.obsidian\.md[^\s"\']*)', "obsidian_sync"),
+            (r'(publish\.obsidian\.md[^\s"\']*)', "obsidian_publish"),
+            (r'(api\.obsidian\.md[^\s"\']*)', "obsidian_api"),
+            (r'obsidian["\s:=]+["\']?([^\s"\']+)["\']?', "obsidian_config"),
+            (r'obsidian[_-]?(?:vault|sync|api|token|key)["\s:=]+["\']?([^\s"\']+)["\']?', "obsidian_config"),
+            (r'(?:vault|workspace)["\s:=]+["\']?([^\s"\']*obsidian[^\s"\']*)["\']?', "obsidian_vault"),
+            (r'(roamresearch\.com[^\s"\']*)', "roam"),
+            (r'(logseq\.com[^\s"\']*)', "logseq"),
+            (r'(evernote\.com[^\s"\']*)', "evernote"),
+            (r'(notion\.so[^\s"\']*)', "notion"),
+            (r'(api\.notion\.com[^\s"\']*)', "notion_api"),
 
             (r's3://([^\s"\']+)', "s3"),
             (r'(?:bucket|container)["\s:=]+["\']?([^\s"\']+)["\']?', "storage"),
@@ -966,10 +1007,26 @@ class InstallationTracker:
 
                 # Check for known service names as keys
                 known_services = [
+                    # Messaging
                     "telegram", "slack", "discord", "whatsapp", "signal",
                     "teams", "matrix", "google_chat", "imessage", "webchat",
-                    "github", "gitlab", "jira", "notion", "trello",
-                    "calendar", "google", "microsoft", "aws", "azure"
+                    # Dev tools
+                    "github", "gitlab", "jira", "notion", "trello", "linear",
+                    "asana", "clickup", "monday", "basecamp",
+                    # Calendar
+                    "calendar", "google_calendar", "outlook_calendar", "calendly",
+                    "cal", "ical", "caldav", "zoom", "meet",
+                    # Notes
+                    "obsidian", "roam", "logseq", "evernote", "onenote", "bear",
+                    "craft", "notion", "coda", "remnote", "mem", "tana",
+                    # Cloud
+                    "google", "microsoft", "aws", "azure", "gcp",
+                    # AI
+                    "openai", "anthropic", "claude", "gpt", "gemini", "llama",
+                    # Storage
+                    "dropbox", "drive", "onedrive", "box", "s3",
+                    # Other
+                    "zapier", "ifttt", "make", "n8n", "webhooks"
                 ]
                 if key_lower in known_services and value:
                     integrations.append({
