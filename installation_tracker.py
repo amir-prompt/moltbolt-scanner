@@ -1346,62 +1346,90 @@ class InstallationTracker:
 
         return sorted(apps_list, key=lambda x: x["access_count"], reverse=True)
 
-    def auto_discover_log_files(self) -> List[str]:
-        """Automatically discover log files on the system."""
+    def auto_discover_log_files(self, tools_only: bool = False, tool_names: List[str] = None) -> List[str]:
+        """Automatically discover log files on the system.
+
+        Args:
+            tools_only: If True, only search for logs from tracked tools (clawbot/moltbot/openclaw)
+            tool_names: Optional list of specific tool names to search for
+        """
         discovered_logs = []
 
-        # Common log file locations to search
-        log_locations = [
-            # User home directory logs
-            "~/.*/logs/*.log",
-            "~/.*/log/*.log",
-            "~/.*/logs/*.txt",
-            "~/.*/log/*.txt",
-            "~/.*/output.log",
-            "~/.*/debug.log",
-            "~/.*/error.log",
-            "~/.*/app.log",
-            "~/.*/*.log",
+        # If tools_only, only search for specific tool logs
+        if tools_only or tool_names:
+            tools = tool_names or list(TOOL_CONFIGS.keys())
+            log_locations = []
+            for tool in tools:
+                log_locations.extend([
+                    f"~/.{tool}/*.log",
+                    f"~/.{tool}/logs/*.log",
+                    f"~/.{tool}/log/*.log",
+                    f"~/.{tool}/**/*.log",
+                    f"~/.config/{tool}/*.log",
+                    f"~/.config/{tool}/logs/*.log",
+                    f"~/.local/share/{tool}/*.log",
+                    f"~/.local/share/{tool}/logs/*.log",
+                    f"/var/log/{tool}/*.log",
+                    f"/var/log/{tool}*/*.log",
+                    f"/tmp/{tool}*.log",
+                    f"~/Library/Logs/{tool}/*.log",
+                    f"~/Library/Logs/{tool.capitalize()}/*.log",
+                    f"~/Library/Application Support/{tool}/logs/*.log",
+                    f"~/Library/Application Support/{tool.capitalize()}/logs/*.log",
+                ])
+        else:
+            # Common log file locations to search
+            log_locations = [
+                # User home directory logs
+                "~/.*/logs/*.log",
+                "~/.*/log/*.log",
+                "~/.*/logs/*.txt",
+                "~/.*/log/*.txt",
+                "~/.*/output.log",
+                "~/.*/debug.log",
+                "~/.*/error.log",
+                "~/.*/app.log",
+                "~/.*/*.log",
 
-            # Config directories
-            "~/.config/*/logs/*.log",
-            "~/.config/*/*.log",
-            "~/.local/share/*/logs/*.log",
-            "~/.local/state/*/*.log",
+                # Config directories
+                "~/.config/*/logs/*.log",
+                "~/.config/*/*.log",
+                "~/.local/share/*/logs/*.log",
+                "~/.local/state/*/*.log",
 
-            # Application specific
-            "~/.npm/_logs/*.log",
-            "~/.yarn/logs/*.log",
-            "~/.docker/*.log",
-            "~/.kube/*.log",
+                # Application specific
+                "~/.npm/_logs/*.log",
+                "~/.yarn/logs/*.log",
+                "~/.docker/*.log",
+                "~/.kube/*.log",
 
-            # AI/Bot tools
-            "~/.claude/*.log",
-            "~/.claude/logs/*.log",
-            "~/.anthropic/*.log",
-            "~/.openai/*.log",
-            "~/.copilot/*.log",
-            "~/.cursor/*.log",
-            "~/.tabnine/*.log",
-            "~/.codeium/*.log",
+                # AI/Bot tools
+                "~/.claude/*.log",
+                "~/.claude/logs/*.log",
+                "~/.anthropic/*.log",
+                "~/.openai/*.log",
+                "~/.copilot/*.log",
+                "~/.cursor/*.log",
+                "~/.tabnine/*.log",
+                "~/.codeium/*.log",
 
-            # Common app directories
-            "~/.vscode/*.log",
-            "~/.vscode/logs/*.log",
-            "~/Library/Logs/*/*.log",
-            "~/Library/Logs/*.log",
-            "~/Library/Application Support/*/logs/*.log",
+                # Common app directories
+                "~/.vscode/*.log",
+                "~/.vscode/logs/*.log",
+                "~/Library/Logs/*/*.log",
+                "~/Library/Logs/*.log",
+                "~/Library/Application Support/*/logs/*.log",
 
-            # System logs (if accessible)
-            "/var/log/*.log",
-            "/var/log/*/*.log",
-            "/tmp/*.log",
+                # System logs (if accessible)
+                "/var/log/*.log",
+                "/var/log/*/*.log",
+                "/tmp/*.log",
 
-            # Current directory and project logs
-            "./*.log",
-            "./logs/*.log",
-            "./log/*.log",
-        ]
+                # Current directory and project logs
+                "./*.log",
+                "./logs/*.log",
+                "./log/*.log",
+            ]
 
         for pattern in log_locations:
             expanded = self._expand_path(pattern)
@@ -1592,6 +1620,11 @@ Examples:
         help="Automatically discover and scan log files on the system"
     )
     parser.add_argument(
+        "--tools-only",
+        action="store_true",
+        help="Only search for logs from tracked tools (clawbot/moltbot/openclaw)"
+    )
+    parser.add_argument(
         "--show-discovered",
         action="store_true",
         help="Show discovered log files without scanning"
@@ -1613,8 +1646,15 @@ Examples:
 
     # Handle --show-discovered
     if args.show_discovered:
-        print("Discovering log files...")
-        discovered = tracker.auto_discover_log_files()
+        tools_filter = args.tools if args.tools else (list(TOOL_CONFIGS.keys()) if args.tools_only else None)
+        if args.tools_only:
+            print(f"Discovering log files for tools: {', '.join(tools_filter)}...")
+        else:
+            print("Discovering log files...")
+        discovered = tracker.auto_discover_log_files(
+            tools_only=args.tools_only,
+            tool_names=args.tools
+        )
         if discovered:
             print(f"\nFound {len(discovered)} log files:\n")
             for log_file in discovered:
@@ -1637,8 +1677,15 @@ Examples:
 
     # Perform scan - auto-discover, custom log files, or tool-based
     if args.auto_discover:
-        print("Auto-discovering log files...")
-        discovered = tracker.auto_discover_log_files()
+        if args.tools_only:
+            tools_filter = args.tools if args.tools else list(TOOL_CONFIGS.keys())
+            print(f"Auto-discovering log files for: {', '.join(tools_filter)}...")
+        else:
+            print("Auto-discovering log files...")
+        discovered = tracker.auto_discover_log_files(
+            tools_only=args.tools_only,
+            tool_names=args.tools
+        )
         if discovered:
             print(f"Found {len(discovered)} log files, scanning...\n")
             tracker.scan_log_files(discovered)
