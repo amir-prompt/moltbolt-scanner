@@ -1150,6 +1150,217 @@ class InstallationTracker:
 
         return skills
 
+    def _scan_workspace_library(self, tool_name: str) -> Dict[str, Any]:
+        """Scan the workspace library for connected apps and integrations.
+
+        Scans:
+        - skills/ directory for installed skills
+        - extensions/ directory for installed extensions
+        - plugins/ directory for installed plugins
+        - channels from config (telegram, slack, discord, etc.)
+        - MCP servers configuration
+        - OAuth credentials
+        """
+        result = {
+            "connected_apps": [],
+            "channels": [],
+            "skills": [],
+            "extensions": [],
+            "plugins": [],
+            "mcp_servers": [],
+            "oauth_credentials": [],
+        }
+
+        # Check multiple possible workspace locations
+        workspace_dirs = [
+            "~/.moltbot",
+            "~/.clawdbot",
+            "~/.openclaw",
+            f"~/.{tool_name}",
+        ]
+
+        for ws_dir in workspace_dirs:
+            ws_path = self._expand_path(ws_dir)
+            if not os.path.exists(ws_path):
+                continue
+
+            # Scan skills directory
+            skills_path = os.path.join(ws_path, "skills")
+            if os.path.exists(skills_path):
+                for item in os.listdir(skills_path):
+                    item_path = os.path.join(skills_path, item)
+                    if os.path.isdir(item_path):
+                        skill_info = self._parse_skill_or_extension(item_path, "skill")
+                        if skill_info:
+                            result["skills"].append(skill_info)
+                            result["connected_apps"].append({
+                                "name": skill_info["name"],
+                                "type": "skill",
+                                "source": skills_path,
+                                "details": skill_info
+                            })
+
+            # Scan extensions directory
+            extensions_path = os.path.join(ws_path, "extensions")
+            if os.path.exists(extensions_path):
+                for item in os.listdir(extensions_path):
+                    item_path = os.path.join(extensions_path, item)
+                    if os.path.isdir(item_path):
+                        ext_info = self._parse_skill_or_extension(item_path, "extension")
+                        if ext_info:
+                            result["extensions"].append(ext_info)
+                            result["connected_apps"].append({
+                                "name": ext_info["name"],
+                                "type": "extension",
+                                "source": extensions_path,
+                                "details": ext_info
+                            })
+
+            # Scan plugins directory
+            plugins_path = os.path.join(ws_path, "plugins")
+            if os.path.exists(plugins_path):
+                for item in os.listdir(plugins_path):
+                    item_path = os.path.join(plugins_path, item)
+                    if os.path.isdir(item_path):
+                        plugin_info = self._parse_skill_or_extension(item_path, "plugin")
+                        if plugin_info:
+                            result["plugins"].append(plugin_info)
+                            result["connected_apps"].append({
+                                "name": plugin_info["name"],
+                                "type": "plugin",
+                                "source": plugins_path,
+                                "details": plugin_info
+                            })
+
+            # Check for OAuth credentials
+            creds_path = os.path.join(ws_path, "credentials")
+            if os.path.exists(creds_path):
+                oauth_file = os.path.join(creds_path, "oauth.json")
+                if os.path.exists(oauth_file):
+                    try:
+                        with open(oauth_file, 'r') as f:
+                            oauth_data = json.load(f)
+                            for provider, creds in oauth_data.items():
+                                result["oauth_credentials"].append({
+                                    "provider": provider,
+                                    "has_token": bool(creds.get("access_token") or creds.get("token")),
+                                    "scopes": creds.get("scopes", []),
+                                })
+                                result["connected_apps"].append({
+                                    "name": provider,
+                                    "type": "oauth_provider",
+                                    "source": oauth_file,
+                                    "details": {"has_credentials": True}
+                                })
+                    except (json.JSONDecodeError, IOError):
+                        pass
+
+            # Parse main config for channels
+            for config_name in ["moltbot.json", "clawdbot.json", "config.json"]:
+                config_path = os.path.join(ws_path, config_name)
+                if os.path.exists(config_path):
+                    config_data = self._read_config_file(config_path)
+                    if config_data:
+                        # Extract channels
+                        channels_config = config_data.get("channels", {})
+                        channel_types = ["telegram", "slack", "discord", "whatsapp", "signal",
+                                        "googlechat", "imessage", "msteams", "matrix", "webchat"]
+                        for ch_type in channel_types:
+                            ch_config = channels_config.get(ch_type)
+                            if ch_config and ch_config.get("enabled", True) != False:
+                                ch_info = {
+                                    "name": ch_type.title(),
+                                    "type": ch_type,
+                                    "enabled": ch_config.get("enabled", True),
+                                    "has_token": bool(ch_config.get("token") or ch_config.get("botToken")),
+                                }
+                                result["channels"].append(ch_info)
+                                result["connected_apps"].append({
+                                    "name": ch_type.title(),
+                                    "type": "channel",
+                                    "source": config_path,
+                                    "details": ch_info
+                                })
+
+                        # Extract MCP servers
+                        mcp_config = config_data.get("mcpServers", {})
+                        for server_name, server_config in mcp_config.items():
+                            server_info = {
+                                "name": server_name,
+                                "command": server_config.get("command", ""),
+                                "enabled": server_config.get("enabled", True),
+                            }
+                            result["mcp_servers"].append(server_info)
+                            result["connected_apps"].append({
+                                "name": server_name,
+                                "type": "mcp_server",
+                                "source": config_path,
+                                "details": server_info
+                            })
+
+                        # Extract skills entries from config
+                        skills_config = config_data.get("skills", {}).get("entries", {})
+                        for skill_name, skill_config in skills_config.items():
+                            if skill_config.get("enabled", True):
+                                result["connected_apps"].append({
+                                    "name": skill_name,
+                                    "type": "skill_config",
+                                    "source": config_path,
+                                    "details": {"enabled": True, "has_api_key": bool(skill_config.get("apiKey"))}
+                                })
+
+        return result
+
+    def _parse_skill_or_extension(self, path: str, item_type: str) -> Optional[Dict[str, Any]]:
+        """Parse a skill, extension, or plugin directory."""
+        name = os.path.basename(path)
+        info = {
+            "name": name,
+            "type": item_type,
+            "path": path,
+            "has_manifest": False,
+            "description": None,
+            "connected_services": [],
+        }
+
+        # Check for SKILL.md or manifest files
+        manifest_files = ["SKILL.md", "EXTENSION.md", "PLUGIN.md", "manifest.json", "package.json"]
+        for manifest in manifest_files:
+            manifest_path = os.path.join(path, manifest)
+            if os.path.exists(manifest_path):
+                info["has_manifest"] = True
+                try:
+                    with open(manifest_path, 'r') as f:
+                        content = f.read()
+                        # Try to extract description
+                        if manifest.endswith('.md'):
+                            # Look for first paragraph or summary line
+                            lines = content.split('\n')
+                            for line in lines:
+                                if line.strip() and not line.startswith('#') and not line.startswith('---'):
+                                    info["description"] = line.strip()[:200]
+                                    break
+                        elif manifest == "package.json":
+                            pkg = json.loads(content)
+                            info["description"] = pkg.get("description", "")[:200]
+
+                        # Look for connected services in content
+                        service_patterns = [
+                            "telegram", "slack", "discord", "github", "gitlab",
+                            "google", "microsoft", "aws", "openai", "anthropic",
+                            "notion", "obsidian", "calendar", "gmail", "drive",
+                            "dropbox", "trello", "jira", "linear", "asana"
+                        ]
+                        content_lower = content.lower()
+                        for svc in service_patterns:
+                            if svc in content_lower:
+                                info["connected_services"].append(svc)
+                except (IOError, json.JSONDecodeError):
+                    pass
+                break
+
+        return info
+
     def _extract_api_keys_from_config(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
         """Extract potential API keys from configuration."""
         api_keys = []
@@ -1193,6 +1404,7 @@ class InstallationTracker:
             "accessed_apps_summary": {},
             "integrations": [],
             "skills": [],
+            "workspace_library": {},  # Connected apps from workspace
         }
 
         # Check binary installation
@@ -1250,6 +1462,19 @@ class InstallationTracker:
         workspace_path = config.get("workspace_path", f"~/.{tool_name}/workspace")
         skills = self._scan_skills_directory(workspace_path)
         result["skills"] = skills
+
+        # Scan workspace library for connected apps
+        workspace_library = self._scan_workspace_library(tool_name)
+        result["workspace_library"] = workspace_library
+        # Add workspace connected apps to integrations
+        for app in workspace_library.get("connected_apps", []):
+            result["integrations"].append({
+                "name": app["name"],
+                "type": app["type"],
+                "source": app.get("source", "workspace_library"),
+                "enabled": app.get("details", {}).get("enabled", True),
+                "config": app.get("details", {})
+            })
 
         # Find and parse log files
         log_files = self._find_log_files(config.get("log_paths", []))
@@ -1440,6 +1665,48 @@ class InstallationTracker:
                 lines.append(f"  INSTALLED SKILLS ({len(tool_data['skills'])}):")
                 for skill in tool_data["skills"]:
                     lines.append(f"    - {skill['name']}")
+
+            # Show workspace library connected apps
+            ws_lib = tool_data.get("workspace_library", {})
+            if ws_lib.get("channels"):
+                lines.append("")
+                lines.append(f"  CONNECTED CHANNELS ({len(ws_lib['channels'])}):")
+                for ch in ws_lib["channels"]:
+                    status = "enabled" if ch.get("enabled", True) else "disabled"
+                    token_status = "(has token)" if ch.get("has_token") else "(no token)"
+                    lines.append(f"    - {ch['name']} [{status}] {token_status}")
+
+            if ws_lib.get("mcp_servers"):
+                lines.append("")
+                lines.append(f"  MCP SERVERS ({len(ws_lib['mcp_servers'])}):")
+                for srv in ws_lib["mcp_servers"]:
+                    lines.append(f"    - {srv['name']}: {srv.get('command', 'N/A')[:50]}")
+
+            if ws_lib.get("extensions"):
+                lines.append("")
+                lines.append(f"  EXTENSIONS ({len(ws_lib['extensions'])}):")
+                for ext in ws_lib["extensions"]:
+                    desc = f" - {ext['description'][:40]}..." if ext.get("description") else ""
+                    lines.append(f"    - {ext['name']}{desc}")
+
+            if ws_lib.get("oauth_credentials"):
+                lines.append("")
+                lines.append(f"  OAUTH CREDENTIALS ({len(ws_lib['oauth_credentials'])}):")
+                for cred in ws_lib["oauth_credentials"]:
+                    lines.append(f"    - {cred['provider']} (has_token: {cred['has_token']})")
+
+            if ws_lib.get("connected_apps"):
+                lines.append("")
+                lines.append(f"  ALL CONNECTED APPS ({len(ws_lib['connected_apps'])}):")
+                # Group by type
+                by_type = {}
+                for app in ws_lib["connected_apps"]:
+                    app_type = app.get("type", "unknown")
+                    if app_type not in by_type:
+                        by_type[app_type] = []
+                    by_type[app_type].append(app["name"])
+                for app_type, apps in by_type.items():
+                    lines.append(f"    [{app_type}]: {', '.join(apps)}")
 
             if tool_data["log_files"]:
                 lines.append(f"  Log Files ({len(tool_data['log_files'])}):")
