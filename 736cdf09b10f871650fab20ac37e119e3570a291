@@ -1,0 +1,23 @@
+installation_tracker.py
+  9f903962a3c3e6f5 71-97,141-178,651-672,683-725
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.41",
+  "base_commit_sha": "736cdf09b10f871650fab20ac37e119e3570a291",
+  "prompts": {
+    "9f903962a3c3e6f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0df9b026-8e6b-4f70-ae88-36af6c466ebc",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "Amir Barshavit <amir@prompt.security>",
+      "messages": [],
+      "total_additions": 130,
+      "total_deletions": 0,
+      "accepted_lines": 130,
+      "overriden_lines": 0
+    }
+  }
+}
