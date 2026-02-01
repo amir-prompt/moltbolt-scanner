@@ -1136,38 +1136,16 @@ class InstallationTracker:
                 for conn in tool_data["connections"][:10]:
                     lines.append(f"    - {conn['resource']}")
 
-            # Accessed Apps Summary
+            # Accessed Apps/Integrations - Simple flat list
             summary = tool_data.get("accessed_apps_summary", {})
-            if summary.get("total_access_events", 0) > 0:
+            unique_services = summary.get("unique_services", [])
+            if unique_services:
                 lines.append("")
-                lines.append("  ACCESSED APPS/SERVICES:")
-                lines.append(f"    Total Access Events: {summary['total_access_events']}")
-                lines.append(f"    Unique Services: {len(summary.get('unique_services', []))}")
-
-                by_status = summary.get("by_status", {})
-                lines.append(f"    Status: {by_status.get('success', 0)} success, "
-                           f"{by_status.get('failed', 0)} failed, "
-                           f"{by_status.get('attempted', 0)} attempted")
-
-                # Show by category
-                by_category = summary.get("by_category", {})
-                if by_category:
-                    lines.append("")
-                    lines.append("    By Category:")
-                    for category, services in sorted(by_category.items()):
-                        if services:
-                            lines.append(f"      [{category}]")
-                            for svc in services[:5]:  # Limit to 5 per category
-                                status_str = ""
-                                if svc.get("success_count", 0) > 0:
-                                    status_str += f" ({svc['success_count']} ok"
-                                if svc.get("failure_count", 0) > 0:
-                                    status_str += f", {svc['failure_count']} fail"
-                                if status_str:
-                                    status_str += ")"
-                                lines.append(f"        - {svc['resource'][:50]}{status_str}")
-                            if len(services) > 5:
-                                lines.append(f"        ... and {len(services) - 5} more")
+                lines.append("  ACCESSED APPS/INTEGRATIONS:")
+                for svc in unique_services:
+                    resource = svc.get("resource", "")
+                    if resource:
+                        lines.append(f"    - {resource}")
 
             lines.append("")
 
@@ -1177,6 +1155,18 @@ class InstallationTracker:
         """Export results as JSON."""
         if not self.results:
             self.scan_all()
+
+        # Add flat list of all accessed apps/integrations at top level
+        all_accessed = []
+        seen = set()
+        for tool_name, tool_data in self.results.get("tools", {}).items():
+            for svc in tool_data.get("accessed_apps_summary", {}).get("unique_services", []):
+                resource = svc.get("resource", "")
+                if resource and resource not in seen:
+                    seen.add(resource)
+                    all_accessed.append(resource)
+
+        self.results["accessed_integrations"] = all_accessed
 
         output = json.dumps(self.results, indent=2, default=str)
 
@@ -1398,7 +1388,12 @@ class InstallationTracker:
                 "custom_logs": {
                     "tool_name": "custom_logs",
                     "installed": True,
+                    "installation_details": {"source": "custom_log_files"},
                     "active": True,
+                    "processes": [],
+                    "port_listening": False,
+                    "config_files": [],
+                    "api_keys_found": [],
                     "log_files": all_log_files,
                     "connections": all_connections,
                     "accessed_apps": all_accessed_apps,
