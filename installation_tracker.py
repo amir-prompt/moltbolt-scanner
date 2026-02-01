@@ -1346,6 +1346,94 @@ class InstallationTracker:
 
         return sorted(apps_list, key=lambda x: x["access_count"], reverse=True)
 
+    def auto_discover_log_files(self) -> List[str]:
+        """Automatically discover log files on the system."""
+        discovered_logs = []
+
+        # Common log file locations to search
+        log_locations = [
+            # User home directory logs
+            "~/.*/logs/*.log",
+            "~/.*/log/*.log",
+            "~/.*/logs/*.txt",
+            "~/.*/log/*.txt",
+            "~/.*/output.log",
+            "~/.*/debug.log",
+            "~/.*/error.log",
+            "~/.*/app.log",
+            "~/.*/*.log",
+
+            # Config directories
+            "~/.config/*/logs/*.log",
+            "~/.config/*/*.log",
+            "~/.local/share/*/logs/*.log",
+            "~/.local/state/*/*.log",
+
+            # Application specific
+            "~/.npm/_logs/*.log",
+            "~/.yarn/logs/*.log",
+            "~/.docker/*.log",
+            "~/.kube/*.log",
+
+            # AI/Bot tools
+            "~/.claude/*.log",
+            "~/.claude/logs/*.log",
+            "~/.anthropic/*.log",
+            "~/.openai/*.log",
+            "~/.copilot/*.log",
+            "~/.cursor/*.log",
+            "~/.tabnine/*.log",
+            "~/.codeium/*.log",
+
+            # Common app directories
+            "~/.vscode/*.log",
+            "~/.vscode/logs/*.log",
+            "~/Library/Logs/*/*.log",
+            "~/Library/Logs/*.log",
+            "~/Library/Application Support/*/logs/*.log",
+
+            # System logs (if accessible)
+            "/var/log/*.log",
+            "/var/log/*/*.log",
+            "/tmp/*.log",
+
+            # Current directory and project logs
+            "./*.log",
+            "./logs/*.log",
+            "./log/*.log",
+        ]
+
+        for pattern in log_locations:
+            expanded = self._expand_path(pattern)
+            try:
+                matches = glob.glob(expanded, recursive=False)
+                for match in matches:
+                    if os.path.isfile(match) and os.access(match, os.R_OK):
+                        # Skip very large files (>50MB) and binary files
+                        try:
+                            size = os.path.getsize(match)
+                            if size > 50 * 1024 * 1024:  # 50MB
+                                continue
+                            # Quick check if file is text
+                            with open(match, 'rb') as f:
+                                chunk = f.read(1024)
+                                if b'\x00' in chunk:  # Binary file
+                                    continue
+                            discovered_logs.append(match)
+                        except (IOError, OSError):
+                            continue
+            except (OSError, PermissionError):
+                continue
+
+        # Remove duplicates and sort by modification time (newest first)
+        discovered_logs = list(set(discovered_logs))
+        try:
+            discovered_logs.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+        except OSError:
+            pass
+
+        return discovered_logs
+
     def scan_log_files(self, log_file_patterns: List[str]) -> Dict[str, Any]:
         """Scan specific log files directly for accessed apps/services."""
         user_info = self._get_machine_user_info()
@@ -1497,6 +1585,17 @@ Examples:
         nargs="+",
         help="Scan specific log files directly (e.g., --log-files /path/to/app.log /var/log/*.log)"
     )
+    parser.add_argument(
+        "--auto-discover",
+        "-a",
+        action="store_true",
+        help="Automatically discover and scan log files on the system"
+    )
+    parser.add_argument(
+        "--show-discovered",
+        action="store_true",
+        help="Show discovered log files without scanning"
+    )
 
     args = parser.parse_args()
 
@@ -1512,6 +1611,23 @@ Examples:
 
     tracker = InstallationTracker(api_key=args.api_key)
 
+    # Handle --show-discovered
+    if args.show_discovered:
+        print("Discovering log files...")
+        discovered = tracker.auto_discover_log_files()
+        if discovered:
+            print(f"\nFound {len(discovered)} log files:\n")
+            for log_file in discovered:
+                try:
+                    size = os.path.getsize(log_file)
+                    size_str = f"{size / 1024:.1f}KB" if size < 1024 * 1024 else f"{size / (1024*1024):.1f}MB"
+                    print(f"  {log_file} ({size_str})")
+                except OSError:
+                    print(f"  {log_file}")
+        else:
+            print("No log files found.")
+        return
+
     # Determine which tools to scan
     tools_to_scan = None
     if args.tools:
@@ -1519,8 +1635,17 @@ Examples:
     elif args.tool:
         tools_to_scan = [args.tool]
 
-    # Perform scan - either custom log files or tool-based
-    if args.log_files:
+    # Perform scan - auto-discover, custom log files, or tool-based
+    if args.auto_discover:
+        print("Auto-discovering log files...")
+        discovered = tracker.auto_discover_log_files()
+        if discovered:
+            print(f"Found {len(discovered)} log files, scanning...\n")
+            tracker.scan_log_files(discovered)
+        else:
+            print("No log files found. Running standard tool scan.\n")
+            tracker.scan_all(tools=tools_to_scan)
+    elif args.log_files:
         tracker.scan_log_files(args.log_files)
     else:
         tracker.scan_all(tools=tools_to_scan)
