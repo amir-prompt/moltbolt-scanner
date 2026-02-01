@@ -14,6 +14,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
+# Try to import yaml, fallback to basic parsing if not available
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
 # Configuration - Add your API key here
 API_KEY = "YOUR_API_KEY_HERE"
 
@@ -105,7 +112,16 @@ TOOL_CONFIGS = {
     "openclaw": {
         "config_paths": [
             "~/.openclaw/openclaw.json",
+            "~/.openclaw/config.json",
+            "~/.openclaw/config.yaml",
+            "~/.openclaw/config.yml",
+            "~/.openclaw/openclaw.yaml",
+            "~/.openclaw/openclaw.yml",
             "~/.config/openclaw/config.json",
+            "~/.config/openclaw/config.yaml",
+            "~/.config/openclaw/config.yml",
+            "/etc/openclaw/config.yaml",
+            "/etc/openclaw/config.yml",
         ],
         "log_paths": [
             "~/.openclaw/logs/*.log",
@@ -120,8 +136,19 @@ TOOL_CONFIGS = {
     "moltbot": {
         "config_paths": [
             "~/.moltbot/config.json",
-            "~/.config/moltbot/settings.json",
+            "~/.moltbot/config.yaml",
+            "~/.moltbot/config.yml",
             "~/.moltbot/moltbot.json",
+            "~/.moltbot/moltbot.yaml",
+            "~/.moltbot/moltbot.yml",
+            "~/.config/moltbot/config.json",
+            "~/.config/moltbot/config.yaml",
+            "~/.config/moltbot/config.yml",
+            "~/.config/moltbot/settings.json",
+            "~/.config/moltbot/settings.yaml",
+            "~/.config/moltbot/settings.yml",
+            "/etc/moltbot/config.yaml",
+            "/etc/moltbot/config.yml",
         ],
         "log_paths": [
             "~/.moltbot/logs/*.log",
@@ -136,8 +163,19 @@ TOOL_CONFIGS = {
     "clawbot": {
         "config_paths": [
             "~/.clawbot/config.json",
-            "~/.config/clawbot/settings.json",
+            "~/.clawbot/config.yaml",
+            "~/.clawbot/config.yml",
             "~/.clawbot/clawbot.json",
+            "~/.clawbot/clawbot.yaml",
+            "~/.clawbot/clawbot.yml",
+            "~/.config/clawbot/config.json",
+            "~/.config/clawbot/config.yaml",
+            "~/.config/clawbot/config.yml",
+            "~/.config/clawbot/settings.json",
+            "~/.config/clawbot/settings.yaml",
+            "~/.config/clawbot/settings.yml",
+            "/etc/clawbot/config.yaml",
+            "/etc/clawbot/config.yml",
         ],
         "log_paths": [
             "~/.clawbot/logs/*.log",
@@ -347,12 +385,19 @@ class InstallationTracker:
             return False
 
     def _read_config_file(self, config_path: str) -> Optional[Dict[str, Any]]:
-        """Read and parse a JSON configuration file."""
+        """Read and parse a JSON or YAML configuration file."""
         expanded_path = self._expand_path(config_path)
         if os.path.exists(expanded_path):
             try:
                 with open(expanded_path, "r") as f:
                     content = f.read()
+
+                # Determine file type by extension
+                is_yaml = expanded_path.lower().endswith(('.yaml', '.yml'))
+
+                if is_yaml:
+                    return self._parse_yaml(content, expanded_path)
+                else:
                     # Handle JSON with comments or trailing commas
                     content = re.sub(r'//.*?\n', '\n', content)
                     content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
@@ -361,6 +406,77 @@ class InstallationTracker:
             except (json.JSONDecodeError, IOError) as e:
                 return {"_error": str(e), "_path": expanded_path}
         return None
+
+    def _parse_yaml(self, content: str, filepath: str) -> Optional[Dict[str, Any]]:
+        """Parse YAML content, with fallback if PyYAML not installed."""
+        if YAML_AVAILABLE:
+            try:
+                # Use safe_load to prevent arbitrary code execution
+                data = yaml.safe_load(content)
+                if isinstance(data, dict):
+                    return data
+                return {"_data": data, "_type": type(data).__name__}
+            except yaml.YAMLError as e:
+                return {"_error": str(e), "_path": filepath}
+        else:
+            # Basic YAML parsing fallback (handles simple key: value pairs)
+            return self._basic_yaml_parse(content, filepath)
+
+    def _basic_yaml_parse(self, content: str, filepath: str) -> Dict[str, Any]:
+        """Basic YAML parser for simple configs when PyYAML is not available."""
+        result = {"_warning": "PyYAML not installed, using basic parser", "_path": filepath}
+        current_dict = result
+        indent_stack = [(0, result)]
+
+        for line in content.split('\n'):
+            # Skip comments and empty lines
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+
+            # Calculate indent level
+            indent = len(line) - len(line.lstrip())
+
+            # Find the key-value pair
+            if ':' in stripped:
+                key, _, value = stripped.partition(':')
+                key = key.strip()
+                value = value.strip()
+
+                # Remove quotes from value
+                if value and value[0] in '"\'':
+                    value = value[1:-1] if len(value) > 1 and value[-1] == value[0] else value[1:]
+
+                # Handle nested structures
+                while indent_stack and indent <= indent_stack[-1][0]:
+                    if len(indent_stack) > 1:
+                        indent_stack.pop()
+                    else:
+                        break
+
+                current_dict = indent_stack[-1][1]
+
+                if value:
+                    # Convert common types
+                    if value.lower() == 'true':
+                        value = True
+                    elif value.lower() == 'false':
+                        value = False
+                    elif value.lower() in ('null', 'none', '~'):
+                        value = None
+                    elif value.isdigit():
+                        value = int(value)
+                    elif re.match(r'^-?\d+\.\d+$', value):
+                        value = float(value)
+
+                    current_dict[key] = value
+                else:
+                    # Nested dict
+                    new_dict = {}
+                    current_dict[key] = new_dict
+                    indent_stack.append((indent + 1, new_dict))
+
+        return result
 
     def _find_log_files(self, log_patterns: List[str]) -> List[str]:
         """Find all log files matching the patterns."""
