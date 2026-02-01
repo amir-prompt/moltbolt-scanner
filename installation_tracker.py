@@ -17,6 +17,89 @@ from typing import Optional, Dict, List, Any
 # Configuration - Add your API key here
 API_KEY = "YOUR_API_KEY_HERE"
 
+# Known services/apps for categorization
+KNOWN_SERVICES = {
+    # AI/ML Services
+    "anthropic": {"name": "Anthropic Claude", "category": "AI/ML"},
+    "openai": {"name": "OpenAI", "category": "AI/ML"},
+    "api.openai.com": {"name": "OpenAI API", "category": "AI/ML"},
+    "api.anthropic.com": {"name": "Anthropic API", "category": "AI/ML"},
+    "huggingface": {"name": "Hugging Face", "category": "AI/ML"},
+    "cohere": {"name": "Cohere", "category": "AI/ML"},
+    "replicate": {"name": "Replicate", "category": "AI/ML"},
+    "palm": {"name": "Google PaLM", "category": "AI/ML"},
+    "gemini": {"name": "Google Gemini", "category": "AI/ML"},
+    "vertex": {"name": "Google Vertex AI", "category": "AI/ML"},
+    "bedrock": {"name": "AWS Bedrock", "category": "AI/ML"},
+    "azure.openai": {"name": "Azure OpenAI", "category": "AI/ML"},
+
+    # Cloud Providers
+    "amazonaws.com": {"name": "AWS", "category": "Cloud"},
+    "aws": {"name": "AWS", "category": "Cloud"},
+    "s3.": {"name": "AWS S3", "category": "Cloud Storage"},
+    "ec2.": {"name": "AWS EC2", "category": "Cloud Compute"},
+    "lambda.": {"name": "AWS Lambda", "category": "Cloud Compute"},
+    "azure": {"name": "Microsoft Azure", "category": "Cloud"},
+    "blob.core.windows": {"name": "Azure Blob Storage", "category": "Cloud Storage"},
+    "googleapis.com": {"name": "Google Cloud", "category": "Cloud"},
+    "storage.googleapis": {"name": "Google Cloud Storage", "category": "Cloud Storage"},
+    "digitalocean": {"name": "DigitalOcean", "category": "Cloud"},
+
+    # Version Control
+    "github.com": {"name": "GitHub", "category": "Version Control"},
+    "api.github.com": {"name": "GitHub API", "category": "Version Control"},
+    "gitlab": {"name": "GitLab", "category": "Version Control"},
+    "bitbucket": {"name": "Bitbucket", "category": "Version Control"},
+
+    # Databases
+    "mongodb": {"name": "MongoDB", "category": "Database"},
+    "postgres": {"name": "PostgreSQL", "category": "Database"},
+    "mysql": {"name": "MySQL", "category": "Database"},
+    "redis": {"name": "Redis", "category": "Database"},
+    "elasticsearch": {"name": "Elasticsearch", "category": "Database"},
+    "dynamodb": {"name": "AWS DynamoDB", "category": "Database"},
+    "firestore": {"name": "Google Firestore", "category": "Database"},
+    "supabase": {"name": "Supabase", "category": "Database"},
+
+    # Communication
+    "slack": {"name": "Slack", "category": "Communication"},
+    "discord": {"name": "Discord", "category": "Communication"},
+    "telegram": {"name": "Telegram", "category": "Communication"},
+    "twilio": {"name": "Twilio", "category": "Communication"},
+    "sendgrid": {"name": "SendGrid", "category": "Communication"},
+    "mailgun": {"name": "Mailgun", "category": "Communication"},
+
+    # Authentication
+    "auth0": {"name": "Auth0", "category": "Authentication"},
+    "okta": {"name": "Okta", "category": "Authentication"},
+    "oauth": {"name": "OAuth Provider", "category": "Authentication"},
+    "cognito": {"name": "AWS Cognito", "category": "Authentication"},
+
+    # Monitoring/Logging
+    "datadog": {"name": "Datadog", "category": "Monitoring"},
+    "sentry": {"name": "Sentry", "category": "Monitoring"},
+    "newrelic": {"name": "New Relic", "category": "Monitoring"},
+    "splunk": {"name": "Splunk", "category": "Monitoring"},
+    "grafana": {"name": "Grafana", "category": "Monitoring"},
+    "prometheus": {"name": "Prometheus", "category": "Monitoring"},
+
+    # CI/CD
+    "jenkins": {"name": "Jenkins", "category": "CI/CD"},
+    "circleci": {"name": "CircleCI", "category": "CI/CD"},
+    "travis": {"name": "Travis CI", "category": "CI/CD"},
+    "actions.github": {"name": "GitHub Actions", "category": "CI/CD"},
+
+    # Container/Orchestration
+    "docker": {"name": "Docker", "category": "Container"},
+    "kubernetes": {"name": "Kubernetes", "category": "Orchestration"},
+    "k8s": {"name": "Kubernetes", "category": "Orchestration"},
+
+    # Local Services
+    "localhost": {"name": "Localhost", "category": "Local"},
+    "127.0.0.1": {"name": "Localhost", "category": "Local"},
+    "0.0.0.0": {"name": "All Interfaces", "category": "Local"},
+}
+
 # Known installation paths and configurations
 TOOL_CONFIGS = {
     "openclaw": {
@@ -324,6 +407,198 @@ class InstallationTracker:
 
         return unique_connections
 
+    def _parse_log_for_accessed_apps(self, log_file: str, max_lines: int = 2000) -> List[Dict[str, Any]]:
+        """Parse log file to identify apps/services accessed or attempted to access."""
+        accessed_apps = []
+
+        # Patterns for identifying access attempts and their status
+        access_patterns = [
+            # HTTP/API requests
+            (r'(?:GET|POST|PUT|DELETE|PATCH)\s+["\']?(https?://[^\s"\']+)["\']?', "http_request"),
+            (r'(?:request|fetch|call)(?:ing|ed)?\s+(?:to\s+)?["\']?(https?://[^\s"\']+)["\']?', "api_call"),
+            (r'(?:api|endpoint)["\s:=]+["\']?(https?://[^\s"\'<>]+)["\']?', "api_endpoint"),
+
+            # URLs and hosts
+            (r'(?:url|host|server|endpoint)["\s:=]+["\']?([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+(?::\d+)?)["\']?', "host"),
+            (r'https?://([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)(?:[:/]|$)', "url_host"),
+
+            # Connection events
+            (r'connect(?:ed|ing|ion)?\s+(?:to\s+)?["\']?([a-zA-Z0-9][-a-zA-Z0-9.]+(?::\d+)?)["\']?', "connection"),
+            (r'(?:establish|open)(?:ed|ing)?\s+(?:connection\s+)?(?:to\s+)?["\']?([^\s"\']+)["\']?', "connection"),
+
+            # Authentication
+            (r'(?:auth|login|signin|authenticate)(?:ed|ing|ation)?\s+(?:to|with|for|at)\s+["\']?([^\s"\']+)["\']?', "auth"),
+            (r'(?:oauth|sso|saml)\s+(?:to|with|for)\s+["\']?([^\s"\']+)["\']?', "oauth"),
+            (r'(?:token|credential|key)\s+(?:for|from)\s+["\']?([^\s"\']+)["\']?', "credential"),
+
+            # WebSocket
+            (r'(?:websocket|ws|wss)://([^\s"\']+)', "websocket"),
+
+            # Database connections
+            (r'(?:mongodb|postgres|mysql|redis|elasticsearch)(?:://)?([^\s"\']+)', "database"),
+            (r'(?:database|db)\s+(?:connection|host)["\s:=]+["\']?([^\s"\']+)["\']?', "database"),
+
+            # Service-specific
+            (r'(?:github|gitlab|bitbucket)\.com/([^\s"\']+)', "vcs"),
+            (r'(?:slack|discord|telegram)(?:\.com)?(?:/|:)([^\s"\']+)', "messaging"),
+            (r's3://([^\s"\']+)', "s3"),
+            (r'(?:bucket|container)["\s:=]+["\']?([^\s"\']+)["\']?', "storage"),
+
+            # File system access
+            (r'(?:read|write|access|open)(?:ing|ed)?\s+(?:file\s+)?["\']?(/[^\s"\']+)["\']?', "file"),
+            (r'(?:path|file|directory)["\s:=]+["\']?(/[^\s"\']+)["\']?', "file"),
+
+            # Model/AI service
+            (r'(?:model|llm)["\s:=]+["\']?([^\s"\']+)["\']?', "model"),
+            (r'(?:claude|gpt|gemini|llama|mistral)[-\s]?[\d.]*', "ai_model"),
+        ]
+
+        # Status indicators
+        success_indicators = ['success', 'ok', '200', '201', '204', 'connected', 'authenticated', 'completed', 'done']
+        failure_indicators = ['fail', 'error', 'denied', 'refused', 'timeout', '401', '403', '404', '500', '502', '503', 'rejected', 'unauthorized']
+        attempt_indicators = ['attempt', 'trying', 'connecting', 'requesting', 'fetching']
+
+        try:
+            with open(log_file, "r", errors="ignore") as f:
+                lines = f.readlines()[-max_lines:]
+
+                for line_num, line in enumerate(lines):
+                    line_lower = line.lower()
+
+                    # Determine access status from line context
+                    status = "unknown"
+                    if any(ind in line_lower for ind in success_indicators):
+                        status = "success"
+                    elif any(ind in line_lower for ind in failure_indicators):
+                        status = "failed"
+                    elif any(ind in line_lower for ind in attempt_indicators):
+                        status = "attempted"
+
+                    # Try to extract timestamp
+                    timestamp = None
+                    timestamp_patterns = [
+                        r'(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})',
+                        r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})',
+                        r'\[(\d+)\]',  # Unix timestamp
+                    ]
+                    for ts_pattern in timestamp_patterns:
+                        ts_match = re.search(ts_pattern, line)
+                        if ts_match:
+                            timestamp = ts_match.group(1)
+                            break
+
+                    # Find all access patterns
+                    for pattern, access_type in access_patterns:
+                        matches = re.findall(pattern, line, re.IGNORECASE)
+                        for match in matches:
+                            if isinstance(match, tuple):
+                                match = match[0]
+
+                            # Skip empty or too short matches
+                            if not match or len(match) < 3:
+                                continue
+
+                            # Categorize the service
+                            service_info = self._categorize_service(match)
+
+                            accessed_apps.append({
+                                "resource": match,
+                                "access_type": access_type,
+                                "status": status,
+                                "timestamp": timestamp,
+                                "service_name": service_info.get("name"),
+                                "service_category": service_info.get("category"),
+                                "log_file": log_file,
+                                "line_number": line_num + 1,
+                                "line_sample": line.strip()[:150]
+                            })
+
+        except IOError:
+            pass
+
+        return accessed_apps
+
+    def _categorize_service(self, resource: str) -> Dict[str, str]:
+        """Categorize a resource/service based on known patterns."""
+        resource_lower = resource.lower()
+
+        for pattern, info in KNOWN_SERVICES.items():
+            if pattern.lower() in resource_lower:
+                return info
+
+        # Try to identify by domain patterns
+        if re.search(r'\.gov$', resource_lower):
+            return {"name": "Government Service", "category": "Government"}
+        if re.search(r'\.edu$', resource_lower):
+            return {"name": "Educational Institution", "category": "Education"}
+        if re.search(r'\.internal$|\.local$|\.corp$', resource_lower):
+            return {"name": "Internal Service", "category": "Internal"}
+        if re.search(r'api\.', resource_lower):
+            return {"name": "API Service", "category": "API"}
+
+        return {"name": "Unknown", "category": "Unknown"}
+
+    def _aggregate_accessed_apps(self, apps: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Aggregate accessed apps into a summary with statistics."""
+        summary = {
+            "total_access_events": len(apps),
+            "by_category": {},
+            "by_status": {"success": 0, "failed": 0, "attempted": 0, "unknown": 0},
+            "unique_services": [],
+            "access_timeline": [],
+        }
+
+        seen_services = {}
+
+        for app in apps:
+            # Count by status
+            status = app.get("status", "unknown")
+            if status in summary["by_status"]:
+                summary["by_status"][status] += 1
+
+            # Group by category
+            category = app.get("service_category", "Unknown")
+            if category not in summary["by_category"]:
+                summary["by_category"][category] = []
+
+            # Track unique services per category
+            resource = app.get("resource", "")
+            service_key = f"{category}:{resource}"
+
+            if service_key not in seen_services:
+                seen_services[service_key] = {
+                    "resource": resource,
+                    "service_name": app.get("service_name"),
+                    "category": category,
+                    "access_count": 0,
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "first_seen": app.get("timestamp"),
+                    "last_seen": app.get("timestamp"),
+                    "access_types": set(),
+                }
+                summary["by_category"][category].append(seen_services[service_key])
+
+            # Update service stats
+            seen_services[service_key]["access_count"] += 1
+            seen_services[service_key]["access_types"].add(app.get("access_type", "unknown"))
+            if status == "success":
+                seen_services[service_key]["success_count"] += 1
+            elif status == "failed":
+                seen_services[service_key]["failure_count"] += 1
+            if app.get("timestamp"):
+                seen_services[service_key]["last_seen"] = app.get("timestamp")
+
+        # Convert sets to lists for JSON serialization
+        for service in seen_services.values():
+            service["access_types"] = list(service["access_types"])
+            summary["unique_services"].append(service)
+
+        # Sort unique services by access count
+        summary["unique_services"].sort(key=lambda x: x["access_count"], reverse=True)
+
+        return summary
+
     def _extract_api_keys_from_config(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
         """Extract potential API keys from configuration."""
         api_keys = []
@@ -363,6 +638,8 @@ class InstallationTracker:
             "log_files": [],
             "connections": [],
             "api_keys_found": [],
+            "accessed_apps": [],
+            "accessed_apps_summary": {},
         }
 
         # Check binary installation
@@ -420,6 +697,15 @@ class InstallationTracker:
         for log_file in log_files[:5]:  # Parse top 5 most recent logs
             connections = self._parse_log_connections(log_file)
             result["connections"].extend(connections)
+
+        # Parse logs for accessed apps/services
+        all_accessed_apps = []
+        for log_file in log_files[:5]:  # Parse top 5 most recent logs
+            accessed = self._parse_log_for_accessed_apps(log_file)
+            all_accessed_apps.extend(accessed)
+
+        result["accessed_apps"] = all_accessed_apps
+        result["accessed_apps_summary"] = self._aggregate_accessed_apps(all_accessed_apps)
 
         return result
 
@@ -509,6 +795,39 @@ class InstallationTracker:
                 lines.append(f"  Connections Found ({len(tool_data['connections'])}):")
                 for conn in tool_data["connections"][:10]:
                     lines.append(f"    - {conn['resource']}")
+
+            # Accessed Apps Summary
+            summary = tool_data.get("accessed_apps_summary", {})
+            if summary.get("total_access_events", 0) > 0:
+                lines.append("")
+                lines.append("  ACCESSED APPS/SERVICES:")
+                lines.append(f"    Total Access Events: {summary['total_access_events']}")
+                lines.append(f"    Unique Services: {len(summary.get('unique_services', []))}")
+
+                by_status = summary.get("by_status", {})
+                lines.append(f"    Status: {by_status.get('success', 0)} success, "
+                           f"{by_status.get('failed', 0)} failed, "
+                           f"{by_status.get('attempted', 0)} attempted")
+
+                # Show by category
+                by_category = summary.get("by_category", {})
+                if by_category:
+                    lines.append("")
+                    lines.append("    By Category:")
+                    for category, services in sorted(by_category.items()):
+                        if services:
+                            lines.append(f"      [{category}]")
+                            for svc in services[:5]:  # Limit to 5 per category
+                                status_str = ""
+                                if svc.get("success_count", 0) > 0:
+                                    status_str += f" ({svc['success_count']} ok"
+                                if svc.get("failure_count", 0) > 0:
+                                    status_str += f", {svc['failure_count']} fail"
+                                if status_str:
+                                    status_str += ")"
+                                lines.append(f"        - {svc['resource'][:50]}{status_str}")
+                            if len(services) > 5:
+                                lines.append(f"        ... and {len(services) - 5} more")
 
             lines.append("")
 
