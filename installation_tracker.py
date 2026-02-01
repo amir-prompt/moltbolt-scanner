@@ -1361,6 +1361,165 @@ class InstallationTracker:
 
         return info
 
+    def scan_available_skills(self, source_paths: List[str] = None) -> Dict[str, Any]:
+        """Scan openclaw/moltbot source directories for available skills.
+
+        Args:
+            source_paths: List of paths to scan. If None, uses default locations.
+
+        Returns:
+            Dictionary with available skills and their details.
+        """
+        if source_paths is None:
+            # Default locations to look for moltbot/openclaw source
+            source_paths = [
+                "~/dev/moltbot",
+                "~/dev/openclaw",
+                "~/dev/clawdbot",
+                "~/moltbot",
+                "~/openclaw",
+                "/opt/moltbot",
+                "/opt/openclaw",
+            ]
+
+        result = {
+            "source_paths_checked": [],
+            "available_skills": [],
+            "skills_by_category": {},
+            "total_count": 0,
+        }
+
+        for src_path in source_paths:
+            expanded = self._expand_path(src_path)
+            result["source_paths_checked"].append(expanded)
+
+            if not os.path.exists(expanded):
+                continue
+
+            # Look for skills directory
+            skills_dirs = [
+                os.path.join(expanded, "skills"),
+                os.path.join(expanded, "src", "skills"),
+                os.path.join(expanded, "extensions"),
+            ]
+
+            for skills_dir in skills_dirs:
+                if not os.path.exists(skills_dir):
+                    continue
+
+                try:
+                    for skill_name in os.listdir(skills_dir):
+                        skill_path = os.path.join(skills_dir, skill_name)
+                        if not os.path.isdir(skill_path):
+                            continue
+
+                        skill_md = os.path.join(skill_path, "SKILL.md")
+                        if os.path.exists(skill_md):
+                            skill_info = self._parse_skill_md(skill_md, skill_name, skill_path)
+                            if skill_info:
+                                result["available_skills"].append(skill_info)
+
+                                # Categorize by connected service
+                                for svc in skill_info.get("connected_services", []):
+                                    if svc not in result["skills_by_category"]:
+                                        result["skills_by_category"][svc] = []
+                                    result["skills_by_category"][svc].append(skill_info["name"])
+                except OSError:
+                    pass
+
+        result["total_count"] = len(result["available_skills"])
+        return result
+
+    def _parse_skill_md(self, skill_md_path: str, skill_name: str, skill_path: str) -> Optional[Dict[str, Any]]:
+        """Parse a SKILL.md file to extract skill metadata."""
+        info = {
+            "name": skill_name,
+            "path": skill_path,
+            "description": None,
+            "homepage": None,
+            "emoji": None,
+            "requires": [],
+            "install_methods": [],
+            "connected_services": [],
+        }
+
+        try:
+            with open(skill_md_path, 'r') as f:
+                content = f.read()
+
+            # Parse YAML frontmatter
+            if content.startswith('---'):
+                parts = content.split('---', 2)
+                if len(parts) >= 3:
+                    frontmatter = parts[1].strip()
+                    # Simple YAML parsing for common fields
+                    for line in frontmatter.split('\n'):
+                        if ':' in line:
+                            key, _, value = line.partition(':')
+                            key = key.strip()
+                            value = value.strip().strip('"\'')
+
+                            if key == 'name':
+                                info['name'] = value
+                            elif key == 'description':
+                                info['description'] = value
+                            elif key == 'homepage':
+                                info['homepage'] = value
+                            elif key == 'metadata':
+                                # Try to parse JSON metadata
+                                try:
+                                    import re
+                                    # Find JSON in the value
+                                    json_match = re.search(r'\{.*\}', value)
+                                    if json_match:
+                                        metadata = json.loads(json_match.group())
+                                        moltbot_meta = metadata.get('moltbot', {})
+                                        info['emoji'] = moltbot_meta.get('emoji')
+                                        requires = moltbot_meta.get('requires', {})
+                                        info['requires'] = requires.get('bins', [])
+                                        install = moltbot_meta.get('install', [])
+                                        info['install_methods'] = [i.get('id') for i in install if i.get('id')]
+                                except json.JSONDecodeError:
+                                    pass
+
+            # Detect connected services from content
+            content_lower = content.lower()
+            service_patterns = {
+                "telegram": ["telegram", "t.me"],
+                "slack": ["slack", "slack.com"],
+                "discord": ["discord", "discordapp"],
+                "github": ["github", "github.com"],
+                "notion": ["notion", "notion.so"],
+                "obsidian": ["obsidian", "obsidian.md"],
+                "google": ["google", "googleapis"],
+                "calendar": ["calendar", "ical", "caldav"],
+                "trello": ["trello"],
+                "jira": ["jira", "atlassian"],
+                "spotify": ["spotify"],
+                "openai": ["openai", "gpt"],
+                "anthropic": ["anthropic", "claude"],
+                "apple": ["apple", "icloud"],
+                "whatsapp": ["whatsapp", "wa.me"],
+                "email": ["email", "imap", "smtp", "himalaya"],
+                "weather": ["weather", "forecast"],
+                "notes": ["notes", "bear", "apple-notes"],
+                "reminders": ["reminders", "todo", "things"],
+                "music": ["spotify", "sonos", "music"],
+                "home": ["hue", "homekit", "smart home"],
+                "voice": ["whisper", "tts", "speech"],
+                "image": ["image", "dall-e", "stable diffusion"],
+            }
+
+            for service, patterns in service_patterns.items():
+                if any(p in content_lower for p in patterns):
+                    if service not in info["connected_services"]:
+                        info["connected_services"].append(service)
+
+        except IOError:
+            return None
+
+        return info
+
     def _extract_api_keys_from_config(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
         """Extract potential API keys from configuration."""
         api_keys = []
@@ -2211,6 +2370,17 @@ Examples:
         action="store_true",
         help="Show discovered log files without scanning"
     )
+    parser.add_argument(
+        "--scan-skills",
+        action="store_true",
+        help="Scan openclaw/moltbot source directories for available skills"
+    )
+    parser.add_argument(
+        "--skills-path",
+        type=str,
+        nargs="+",
+        help="Custom paths to scan for skills (use with --scan-skills)"
+    )
 
     args = parser.parse_args()
 
@@ -2225,6 +2395,63 @@ Examples:
         return
 
     tracker = InstallationTracker(api_key=args.api_key)
+
+    # Handle --scan-skills
+    if args.scan_skills:
+        skills_paths = args.skills_path if args.skills_path else None
+        print("Scanning for available openclaw/moltbot skills...")
+        skills_result = tracker.scan_available_skills(skills_paths)
+
+        if args.json:
+            print(json.dumps(skills_result, indent=2))
+        else:
+            print(f"\n{'='*60}")
+            print("AVAILABLE SKILLS")
+            print(f"{'='*60}")
+            print(f"\nTotal skills found: {skills_result['total_count']}")
+            print(f"\nSource paths checked:")
+            for p in skills_result['source_paths_checked']:
+                exists = "✓" if os.path.exists(p) else "✗"
+                print(f"  [{exists}] {p}")
+
+            if skills_result['available_skills']:
+                print(f"\n{'-'*40}")
+                print("SKILLS LIST:")
+                print(f"{'-'*40}")
+                for skill in sorted(skills_result['available_skills'], key=lambda x: x['name']):
+                    emoji = skill.get('emoji') or '📦'
+                    name = skill['name']
+                    desc = (skill.get('description') or 'No description')[:60]
+                    if len(skill.get('description') or '') > 60:
+                        desc += '...'
+                    services = ', '.join(skill.get('connected_services', []))[:30]
+                    requires = ', '.join(skill.get('requires', []))
+
+                    print(f"\n  {emoji} {name}")
+                    print(f"      {desc}")
+                    if services:
+                        print(f"      Services: {services}")
+                    if requires:
+                        print(f"      Requires: {requires}")
+
+                print(f"\n{'-'*40}")
+                print("BY CATEGORY:")
+                print(f"{'-'*40}")
+                for category, skills in sorted(skills_result['skills_by_category'].items()):
+                    print(f"  [{category}]: {', '.join(sorted(skills))}")
+            else:
+                print("\nNo skills found. Make sure moltbot/openclaw source is available.")
+
+        if args.output:
+            with open(args.output, 'w') as f:
+                if args.json:
+                    f.write(json.dumps(skills_result, indent=2))
+                else:
+                    f.write(f"Available Skills: {skills_result['total_count']}\n")
+                    for skill in skills_result['available_skills']:
+                        f.write(f"- {skill['name']}: {skill.get('description', 'N/A')}\n")
+            print(f"\nOutput saved to {args.output}")
+        return
 
     # Handle --show-discovered
     if args.show_discovered:
