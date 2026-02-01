@@ -1,0 +1,23 @@
+list_active_skills.py
+  48bdede8497a86ee 1-360
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.41",
+  "base_commit_sha": "194db0a3a6efc8210fef2301fc6f1af340995f35",
+  "prompts": {
+    "48bdede8497a86ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "da596fad-bb77-4797-9dab-a1c31c5d0206",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "Amir Barshavit <amir@prompt.security>",
+      "messages": [],
+      "total_additions": 468,
+      "total_deletions": 108,
+      "accepted_lines": 360,
+      "overriden_lines": 0
+    }
+  }
+}
