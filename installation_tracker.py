@@ -871,6 +871,150 @@ class InstallationTracker:
 
         return summary
 
+    def _extract_integrations_from_config(self, config: Dict[str, Any], tool_name: str) -> List[Dict[str, Any]]:
+        """Extract integrations/channels from tool configuration."""
+        integrations = []
+
+        if not isinstance(config, dict):
+            return integrations
+
+        # OpenClaw specific: channels.* configuration
+        if "channels" in config and isinstance(config["channels"], dict):
+            for channel_name, channel_config in config["channels"].items():
+                integration = {
+                    "name": channel_name,
+                    "type": "channel",
+                    "source": f"{tool_name} config",
+                    "enabled": True,
+                    "config": channel_config if isinstance(channel_config, dict) else {"value": channel_config}
+                }
+                integrations.append(integration)
+
+        # OpenClaw specific: agent.model (AI provider integration)
+        if "agent" in config and isinstance(config["agent"], dict):
+            if "model" in config["agent"]:
+                model = config["agent"]["model"]
+                provider = model.split("/")[0] if "/" in model else model
+                integrations.append({
+                    "name": provider,
+                    "type": "ai_provider",
+                    "source": f"{tool_name} config",
+                    "enabled": True,
+                    "config": {"model": model}
+                })
+
+        # OpenClaw specific: gateway settings
+        if "gateway" in config and isinstance(config["gateway"], dict):
+            gateway = config["gateway"]
+            if gateway.get("auth", {}).get("mode"):
+                integrations.append({
+                    "name": "gateway_auth",
+                    "type": "authentication",
+                    "source": f"{tool_name} config",
+                    "enabled": True,
+                    "config": gateway.get("auth", {})
+                })
+            if gateway.get("tailscale", {}).get("mode"):
+                integrations.append({
+                    "name": "tailscale",
+                    "type": "network",
+                    "source": f"{tool_name} config",
+                    "enabled": True,
+                    "config": gateway.get("tailscale", {})
+                })
+
+        # Generic integration patterns
+        integration_keys = [
+            "integrations", "plugins", "extensions", "addons",
+            "connections", "services", "providers", "webhooks"
+        ]
+
+        def search_integrations(d: Dict, path: str = ""):
+            for key, value in d.items():
+                current_path = f"{path}.{key}" if path else key
+                key_lower = key.lower()
+
+                # Check if this key suggests an integration
+                if key_lower in integration_keys:
+                    if isinstance(value, dict):
+                        for int_name, int_config in value.items():
+                            integrations.append({
+                                "name": int_name,
+                                "type": key_lower,
+                                "source": f"{tool_name} config ({current_path})",
+                                "enabled": True,
+                                "config": int_config if isinstance(int_config, dict) else {"value": int_config}
+                            })
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, str):
+                                integrations.append({
+                                    "name": item,
+                                    "type": key_lower,
+                                    "source": f"{tool_name} config ({current_path})",
+                                    "enabled": True,
+                                    "config": {}
+                                })
+                            elif isinstance(item, dict):
+                                integrations.append({
+                                    "name": item.get("name", item.get("id", "unknown")),
+                                    "type": key_lower,
+                                    "source": f"{tool_name} config ({current_path})",
+                                    "enabled": item.get("enabled", True),
+                                    "config": item
+                                })
+
+                # Check for known service names as keys
+                known_services = [
+                    "telegram", "slack", "discord", "whatsapp", "signal",
+                    "teams", "matrix", "google_chat", "imessage", "webchat",
+                    "github", "gitlab", "jira", "notion", "trello",
+                    "calendar", "google", "microsoft", "aws", "azure"
+                ]
+                if key_lower in known_services and value:
+                    integrations.append({
+                        "name": key,
+                        "type": "service",
+                        "source": f"{tool_name} config ({current_path})",
+                        "enabled": value.get("enabled", True) if isinstance(value, dict) else bool(value),
+                        "config": value if isinstance(value, dict) else {"value": value}
+                    })
+
+                # Recurse into nested dicts
+                if isinstance(value, dict) and key_lower not in integration_keys:
+                    search_integrations(value, current_path)
+
+        search_integrations(config)
+        return integrations
+
+    def _scan_skills_directory(self, workspace_path: str) -> List[Dict[str, Any]]:
+        """Scan for installed skills/plugins in workspace directory."""
+        skills = []
+        skills_path = os.path.join(self._expand_path(workspace_path), "skills")
+
+        if os.path.exists(skills_path):
+            try:
+                for skill_name in os.listdir(skills_path):
+                    skill_dir = os.path.join(skills_path, skill_name)
+                    if os.path.isdir(skill_dir):
+                        skill_info = {
+                            "name": skill_name,
+                            "type": "skill",
+                            "path": skill_dir,
+                            "has_skill_md": os.path.exists(os.path.join(skill_dir, "SKILL.md")),
+                            "files": []
+                        }
+                        # List files in skill directory
+                        try:
+                            skill_info["files"] = os.listdir(skill_dir)[:10]  # Limit to 10 files
+                        except OSError:
+                            pass
+                        skills.append(skill_info)
+            except OSError:
+                pass
+
+        return skills
+
     def _extract_api_keys_from_config(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
         """Extract potential API keys from configuration."""
         api_keys = []
@@ -912,6 +1056,8 @@ class InstallationTracker:
             "api_keys_found": [],
             "accessed_apps": [],
             "accessed_apps_summary": {},
+            "integrations": [],
+            "skills": [],
         }
 
         # Check binary installation
@@ -960,6 +1106,15 @@ class InstallationTracker:
                 # Extract API keys from config
                 api_keys = self._extract_api_keys_from_config(config_data)
                 result["api_keys_found"].extend(api_keys)
+
+                # Extract integrations from config
+                integrations = self._extract_integrations_from_config(config_data, tool_name)
+                result["integrations"].extend(integrations)
+
+        # Scan skills directory
+        workspace_path = config.get("workspace_path", f"~/.{tool_name}/workspace")
+        skills = self._scan_skills_directory(workspace_path)
+        result["skills"] = skills
 
         # Find and parse log files
         log_files = self._find_log_files(config.get("log_paths", []))
@@ -1125,6 +1280,21 @@ class InstallationTracker:
                 lines.append(f"  API Keys Found ({len(tool_data['api_keys_found'])}):")
                 for ak in tool_data["api_keys_found"]:
                     lines.append(f"    - {ak['path']}: {ak['value_masked']}")
+
+            # Show integrations/channels
+            if tool_data.get("integrations"):
+                lines.append("")
+                lines.append(f"  CONFIGURED INTEGRATIONS ({len(tool_data['integrations'])}):")
+                for intg in tool_data["integrations"]:
+                    status = "enabled" if intg.get("enabled", True) else "disabled"
+                    lines.append(f"    - {intg['name']} [{intg['type']}] ({status})")
+
+            # Show installed skills
+            if tool_data.get("skills"):
+                lines.append("")
+                lines.append(f"  INSTALLED SKILLS ({len(tool_data['skills'])}):")
+                for skill in tool_data["skills"]:
+                    lines.append(f"    - {skill['name']}")
 
             if tool_data["log_files"]:
                 lines.append(f"  Log Files ({len(tool_data['log_files'])}):")
