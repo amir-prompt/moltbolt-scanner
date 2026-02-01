@@ -1665,7 +1665,7 @@ class InstallationTracker:
 
         return result
 
-    def scan_all(self, tools: List[str] = None) -> Dict[str, Any]:
+    def scan_all(self, tools: List[str] = None, include_available_skills: bool = True) -> Dict[str, Any]:
         """Scan for specified tools or all known tools if none specified."""
         user_info = self._get_machine_user_info()
         self.results = {
@@ -1675,7 +1675,8 @@ class InstallationTracker:
                 "api_key_provided": self.api_key[:4] + "****" if len(self.api_key) > 4 else "****",
                 "user": user_info,
             },
-            "tools": {}
+            "tools": {},
+            "available_skills": {},
         }
 
         # Use provided tools list or default to all configured tools
@@ -1687,6 +1688,10 @@ class InstallationTracker:
             else:
                 # For custom tools not in TOOL_CONFIGS, create a generic config
                 self.results["tools"][tool_name] = self.scan_custom_tool(tool_name)
+
+        # Also scan for available skills from source directories
+        if include_available_skills:
+            self.results["available_skills"] = self.scan_available_skills()
 
         return self.results
 
@@ -1887,6 +1892,37 @@ class InstallationTracker:
                     resource = svc.get("resource", "")
                     if resource:
                         lines.append(f"    - {resource}")
+
+            lines.append("")
+
+        # Add available skills section
+        available_skills = self.results.get("available_skills", {})
+        if available_skills.get("available_skills"):
+            lines.append("=" * 60)
+            lines.append("AVAILABLE SKILLS FROM SOURCE")
+            lines.append("=" * 60)
+            lines.append(f"Total: {available_skills.get('total_count', 0)} skills")
+            lines.append("")
+
+            # Group by category for compact display
+            by_category = available_skills.get("skills_by_category", {})
+            if by_category:
+                lines.append("BY SERVICE/CATEGORY:")
+                for category, skills in sorted(by_category.items()):
+                    lines.append(f"  [{category}]: {', '.join(sorted(skills))}")
+                lines.append("")
+
+            # List all skills with details
+            lines.append("SKILLS LIST:")
+            for skill in sorted(available_skills["available_skills"], key=lambda x: x['name']):
+                emoji = skill.get('emoji') or '📦'
+                name = skill['name']
+                desc = (skill.get('description') or '')[:50]
+                if desc:
+                    desc = f" - {desc}"
+                services = skill.get('connected_services', [])
+                svc_str = f" [{', '.join(services[:3])}]" if services else ""
+                lines.append(f"  {emoji} {name}{desc}{svc_str}")
 
             lines.append("")
 
