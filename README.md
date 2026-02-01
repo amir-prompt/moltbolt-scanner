@@ -1,15 +1,35 @@
-# Installation Tracker
+# Moltbot/OpenClaw Scanner Suite
 
-A Python script to detect and track installations of clawbot, moltbot, and openclaw on local machines.
+A collection of Python scripts to detect, track, and analyze installations of clawbot, moltbot, and openclaw.
+
+## Scripts
+
+### 1. `installation_tracker.py` - File-based Scanner
+Scans the filesystem for installations, configs, logs, and integrations.
+
+### 2. `openclaw_cli_scanner.py` - CLI-based Scanner
+Uses the OpenClaw CLI to fetch live data from a running installation.
 
 ## Features
 
+### Installation Tracker (`installation_tracker.py`)
 - **Installation Detection**: Checks for binaries, npm packages, and workspace directories
 - **Active Status Monitoring**: Detects running processes and listening ports
 - **Configuration Parsing**: Reads and parses JSON configuration files
 - **Log Analysis**: Extracts connection information from log files
 - **API Key Detection**: Finds API keys in config files (displayed masked)
 - **User Information**: Collects detailed user info from local machine settings
+- **TOOLS.md Parsing**: Extracts user-defined integrations
+- **Available Skills**: Scans moltbot source for 50+ available skills
+
+### OpenClaw CLI Scanner (`openclaw_cli_scanner.py`)
+- **Skills**: List available skills with readiness status
+- **Channels**: Show configured channels and their health
+- **Agents**: List isolated agents with workspace details
+- **Models**: Display available models and aliases
+- **Plugins**: Show installed plugins
+- **Status**: Gateway health and connectivity
+- **Doctor**: Run health diagnostics
 
 ## Requirements
 
@@ -59,11 +79,48 @@ python3 installation_tracker.py --tool clawbot
 python3 installation_tracker.py --api-key "your-api-key-here"
 ```
 
-Or edit line 18 in `installation_tracker.py`:
+---
 
-```python
-API_KEY = "YOUR_API_KEY_HERE"
+## OpenClaw CLI Scanner Usage
+
+### Basic Scan (requires openclaw/moltbot CLI)
+
+```bash
+python3 openclaw_cli_scanner.py
 ```
+
+### JSON Output
+
+```bash
+python3 openclaw_cli_scanner.py --json
+```
+
+### Specific Data
+
+```bash
+python3 openclaw_cli_scanner.py --skills      # Only skills
+python3 openclaw_cli_scanner.py --channels    # Only channels
+python3 openclaw_cli_scanner.py --models      # Only models
+python3 openclaw_cli_scanner.py --agents      # Only agents
+python3 openclaw_cli_scanner.py --plugins     # Only plugins
+python3 openclaw_cli_scanner.py --status      # Only status
+python3 openclaw_cli_scanner.py --doctor      # Run diagnostics
+```
+
+### Specify CLI Command
+
+```bash
+python3 openclaw_cli_scanner.py --cli moltbot
+python3 openclaw_cli_scanner.py --cli clawdbot
+```
+
+### Save to File
+
+```bash
+python3 openclaw_cli_scanner.py --json -o report.json
+```
+
+---
 
 ## Output
 
