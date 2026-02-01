@@ -68,6 +68,33 @@ KNOWN_SERVICES = {
     "firestore": {"name": "Google Firestore", "category": "Database"},
     "supabase": {"name": "Supabase", "category": "Database"},
 
+    # Calendar Services
+    "calendar": {"name": "Calendar Service", "category": "Calendar"},
+    "google.com/calendar": {"name": "Google Calendar", "category": "Calendar"},
+    "calendar.google.com": {"name": "Google Calendar", "category": "Calendar"},
+    "googleapis.com/calendar": {"name": "Google Calendar API", "category": "Calendar"},
+    "www.googleapis.com/calendar": {"name": "Google Calendar API", "category": "Calendar"},
+    "outlook.office.com/calendar": {"name": "Outlook Calendar", "category": "Calendar"},
+    "outlook.office365.com": {"name": "Microsoft 365 Calendar", "category": "Calendar"},
+    "graph.microsoft.com": {"name": "Microsoft Graph API", "category": "Calendar"},
+    "calendly": {"name": "Calendly", "category": "Calendar"},
+    "calendly.com": {"name": "Calendly", "category": "Calendar"},
+    "api.calendly.com": {"name": "Calendly API", "category": "Calendar"},
+    "cal.com": {"name": "Cal.com", "category": "Calendar"},
+    "ical": {"name": "iCalendar", "category": "Calendar"},
+    "caldav": {"name": "CalDAV", "category": "Calendar"},
+    "webcal": {"name": "Web Calendar", "category": "Calendar"},
+    "nylas": {"name": "Nylas Calendar", "category": "Calendar"},
+    "cronofy": {"name": "Cronofy", "category": "Calendar"},
+    "timekit": {"name": "Timekit", "category": "Calendar"},
+    "acuityscheduling": {"name": "Acuity Scheduling", "category": "Calendar"},
+    "doodle": {"name": "Doodle", "category": "Calendar"},
+    "eventbrite": {"name": "Eventbrite", "category": "Calendar"},
+    "meetup": {"name": "Meetup", "category": "Calendar"},
+    "zoom": {"name": "Zoom", "category": "Calendar"},
+    "teams.microsoft": {"name": "Microsoft Teams", "category": "Calendar"},
+    "meet.google": {"name": "Google Meet", "category": "Calendar"},
+
     # Communication
     "slack": {"name": "Slack", "category": "Communication"},
     "slack.com": {"name": "Slack", "category": "Communication"},
@@ -110,6 +137,44 @@ KNOWN_SERVICES = {
     "docker": {"name": "Docker", "category": "Container"},
     "kubernetes": {"name": "Kubernetes", "category": "Orchestration"},
     "k8s": {"name": "Kubernetes", "category": "Orchestration"},
+
+    # Project Management / Productivity
+    "jira": {"name": "Jira", "category": "Project Management"},
+    "atlassian": {"name": "Atlassian", "category": "Project Management"},
+    "trello": {"name": "Trello", "category": "Project Management"},
+    "asana": {"name": "Asana", "category": "Project Management"},
+    "notion": {"name": "Notion", "category": "Productivity"},
+    "airtable": {"name": "Airtable", "category": "Productivity"},
+    "monday": {"name": "Monday.com", "category": "Project Management"},
+    "clickup": {"name": "ClickUp", "category": "Project Management"},
+    "linear": {"name": "Linear", "category": "Project Management"},
+
+    # Payment / E-commerce
+    "stripe": {"name": "Stripe", "category": "Payment"},
+    "paypal": {"name": "PayPal", "category": "Payment"},
+    "shopify": {"name": "Shopify", "category": "E-commerce"},
+
+    # CRM / Marketing
+    "salesforce": {"name": "Salesforce", "category": "CRM"},
+    "hubspot": {"name": "HubSpot", "category": "CRM"},
+    "zendesk": {"name": "Zendesk", "category": "Support"},
+    "intercom": {"name": "Intercom", "category": "Support"},
+    "mailchimp": {"name": "Mailchimp", "category": "Marketing"},
+
+    # Analytics
+    "segment": {"name": "Segment", "category": "Analytics"},
+    "mixpanel": {"name": "Mixpanel", "category": "Analytics"},
+    "amplitude": {"name": "Amplitude", "category": "Analytics"},
+    "google-analytics": {"name": "Google Analytics", "category": "Analytics"},
+    "analytics.google": {"name": "Google Analytics", "category": "Analytics"},
+
+    # Automation / Integration Platforms
+    "zapier": {"name": "Zapier", "category": "Automation"},
+    "hooks.zapier": {"name": "Zapier Webhook", "category": "Automation"},
+    "ifttt": {"name": "IFTTT", "category": "Automation"},
+    "make.com": {"name": "Make (Integromat)", "category": "Automation"},
+    "n8n": {"name": "n8n", "category": "Automation"},
+    "pipedream": {"name": "Pipedream", "category": "Automation"},
 
     # Local Services
     "localhost": {"name": "Localhost", "category": "Local"},
@@ -583,6 +648,28 @@ class InstallationTracker:
             (r'bot[_-]?token["\s:=]+["\']?([^\s"\']+)["\']?', "bot_token"),
             (r'(\d+:[\w-]{35,})', "telegram_bot_token"),  # Telegram bot token format
 
+            # Calendar services
+            (r'(calendar\.google\.com[^\s"\']*)', "google_calendar"),
+            (r'(www\.googleapis\.com/calendar[^\s"\']*)', "google_calendar_api"),
+            (r'(googleapis\.com/calendar[^\s"\']*)', "google_calendar_api"),
+            (r'(outlook\.office\.com/calendar[^\s"\']*)', "outlook_calendar"),
+            (r'(outlook\.office365\.com[^\s"\']*)', "outlook_calendar"),
+            (r'(graph\.microsoft\.com[^\s"\']*)', "microsoft_graph"),
+            (r'(calendly\.com[^\s"\']*)', "calendly"),
+            (r'(api\.calendly\.com[^\s"\']*)', "calendly_api"),
+            (r'(cal\.com[^\s"\']*)', "cal_com"),
+            (r'(?:calendar|event|meeting|schedule|appointment)["\s:=]+["\']?([^\s"\']+)["\']?', "calendar_config"),
+            (r'(?:ical|ics|caldav|webcal)(?:://|["\s:=]+)["\']?([^\s"\']+)["\']?', "calendar_protocol"),
+            (r'(cronofy\.com[^\s"\']*)', "cronofy"),
+            (r'(nylas\.com[^\s"\']*)', "nylas"),
+            (r'(api\.nylas\.com[^\s"\']*)', "nylas_api"),
+            (r'(zoom\.us[^\s"\']*)', "zoom"),
+            (r'(api\.zoom\.us[^\s"\']*)', "zoom_api"),
+            (r'(teams\.microsoft\.com[^\s"\']*)', "ms_teams"),
+            (r'(meet\.google\.com[^\s"\']*)', "google_meet"),
+            (r'(?:create|add|sync|fetch)(?:ing|ed)?\s+(?:calendar|event|meeting|appointment)[^\s]*', "calendar_action"),
+            (r'calendar[_-]?(?:id|api|key|token|secret)["\s:=]+["\']?([^\s"\']+)["\']?', "calendar_credential"),
+
             (r's3://([^\s"\']+)', "s3"),
             (r'(?:bucket|container)["\s:=]+["\']?([^\s"\']+)["\']?', "storage"),
 
@@ -593,6 +680,49 @@ class InstallationTracker:
             # Model/AI service
             (r'(?:model|llm)["\s:=]+["\']?([^\s"\']+)["\']?', "model"),
             (r'(?:claude|gpt|gemini|llama|mistral)[-\s]?[\d.]*', "ai_model"),
+
+            # Generic integration detection
+            (r'(?:integration|plugin|addon|extension|connector)["\s:=]+["\']?([^\s"\']+)["\']?', "integration"),
+            (r'(?:integrat|connect|link|sync)(?:ing|ed|ion)?\s+(?:to|with)\s+["\']?([^\s"\']+)["\']?', "integration_action"),
+            (r'(?:webhook|hook|callback)["\s_-]?(?:url|endpoint)?["\s:=]+["\']?(https?://[^\s"\']+)["\']?', "webhook"),
+            (r'(?:api|service)[_-]?(?:key|token|secret|credential)["\s:=]+["\']?([^\s"\']+)["\']?', "api_credential"),
+            (r'(?:oauth|access)[_-]?token["\s:=]+["\']?([^\s"\']+)["\']?', "oauth_token"),
+            (r'(?:client)[_-]?(?:id|secret)["\s:=]+["\']?([^\s"\']+)["\']?', "oauth_client"),
+            (r'(?:enabled|active|configured)\s+(?:integration|service|plugin)["\s:]*["\']?([^\s"\']+)["\']?', "enabled_integration"),
+
+            # Third-party services
+            (r'(jira\.atlassian\.com[^\s"\']*)', "jira"),
+            (r'(api\.atlassian\.com[^\s"\']*)', "atlassian"),
+            (r'(trello\.com[^\s"\']*)', "trello"),
+            (r'(api\.trello\.com[^\s"\']*)', "trello_api"),
+            (r'(asana\.com[^\s"\']*)', "asana"),
+            (r'(api\.asana\.com[^\s"\']*)', "asana_api"),
+            (r'(notion\.so[^\s"\']*)', "notion"),
+            (r'(api\.notion\.com[^\s"\']*)', "notion_api"),
+            (r'(airtable\.com[^\s"\']*)', "airtable"),
+            (r'(api\.airtable\.com[^\s"\']*)', "airtable_api"),
+            (r'(monday\.com[^\s"\']*)', "monday"),
+            (r'(clickup\.com[^\s"\']*)', "clickup"),
+            (r'(linear\.app[^\s"\']*)', "linear"),
+            (r'(stripe\.com[^\s"\']*)', "stripe"),
+            (r'(api\.stripe\.com[^\s"\']*)', "stripe_api"),
+            (r'(paypal\.com[^\s"\']*)', "paypal"),
+            (r'(shopify\.com[^\s"\']*)', "shopify"),
+            (r'(salesforce\.com[^\s"\']*)', "salesforce"),
+            (r'(hubspot\.com[^\s"\']*)', "hubspot"),
+            (r'(zendesk\.com[^\s"\']*)', "zendesk"),
+            (r'(intercom\.com[^\s"\']*)', "intercom"),
+            (r'(mailchimp\.com[^\s"\']*)', "mailchimp"),
+            (r'(twilio\.com[^\s"\']*)', "twilio"),
+            (r'(segment\.com[^\s"\']*)', "segment"),
+            (r'(mixpanel\.com[^\s"\']*)', "mixpanel"),
+            (r'(amplitude\.com[^\s"\']*)', "amplitude"),
+            (r'(zapier\.com[^\s"\']*)', "zapier"),
+            (r'(hooks\.zapier\.com[^\s"\']*)', "zapier_webhook"),
+            (r'(ifttt\.com[^\s"\']*)', "ifttt"),
+            (r'(make\.com[^\s"\']*)', "make"),
+            (r'(n8n\.io[^\s"\']*)', "n8n"),
+            (r'(pipedream\.com[^\s"\']*)', "pipedream"),
         ]
 
         # Status indicators
