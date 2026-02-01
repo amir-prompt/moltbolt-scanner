@@ -1492,6 +1492,11 @@ Examples:
         help="Output a simple list of accessed apps/servers"
     )
     parser.add_argument(
+        "--simple",
+        action="store_true",
+        help="Output a simple flat list of all resources (no categories, just the list)"
+    )
+    parser.add_argument(
         "--log-files",
         "-l",
         nargs="+",
@@ -1529,6 +1534,17 @@ Examples:
     if args.access_report:
         # Focused report on accessed apps/servers
         output = tracker.generate_access_report(as_json=args.json)
+    elif args.simple:
+        # Simple flat list - just resources, no categories
+        apps_list = tracker.get_accessed_apps_list()
+        if args.json:
+            # Just the resource names
+            output = json.dumps([app['resource'] for app in apps_list], indent=2)
+        else:
+            if apps_list:
+                output = "\n".join([app['resource'] for app in apps_list])
+            else:
+                output = "No accessed apps/servers found."
     elif args.list_accessed:
         # Simple list of accessed apps/servers
         apps_list = tracker.get_accessed_apps_list()
