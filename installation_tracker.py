@@ -208,84 +208,81 @@ KNOWN_SERVICES = {
 }
 
 # Known installation paths and configurations
+# Based on actual moltbot/clawdbot source code from paths.ts:
+# - State dir: ~/.moltbot (new) or ~/.clawdbot (legacy)
+# - Config files: moltbot.json or clawdbot.json in state dir
+# - Logs: macOS unified log (subsystem: bot.molt) + /tmp/moltbot-gateway.log
+# - Default port: 18789
 TOOL_CONFIGS = {
     "openclaw": {
+        # openclaw is the same as moltbot (different branding)
         "config_paths": [
+            "~/.moltbot/moltbot.json",
+            "~/.moltbot/clawdbot.json",
+            "~/.clawdbot/moltbot.json",
+            "~/.clawdbot/clawdbot.json",
             "~/.openclaw/openclaw.json",
             "~/.openclaw/config.json",
-            "~/.openclaw/config.yaml",
-            "~/.openclaw/config.yml",
-            "~/.openclaw/openclaw.yaml",
-            "~/.openclaw/openclaw.yml",
             "~/.config/openclaw/config.json",
-            "~/.config/openclaw/config.yaml",
-            "~/.config/openclaw/config.yml",
-            "/etc/openclaw/config.yaml",
-            "/etc/openclaw/config.yml",
         ],
         "log_paths": [
+            "/tmp/moltbot-gateway.log",
+            "/tmp/clawdbot-gateway.log",
+            "~/.moltbot/logs/*.log",
+            "~/.clawdbot/logs/*.log",
             "~/.openclaw/logs/*.log",
-            "~/.openclaw/workspace/logs/*.log",
-            "/var/log/openclaw/*.log",
         ],
-        "workspace_path": "~/.openclaw/workspace",
-        "process_names": ["openclaw", "openclaw-gateway", "openclaw-daemon"],
+        "workspace_path": "~/.moltbot",
+        # Specific process patterns - avoid generic 'node'
+        "process_names": ["moltbot gateway", "moltbot-gateway", "clawdbot gateway", "clawdbot-gateway", "openclaw gateway", "openclaw-gateway"],
         "default_port": 18789,
-        "binary_names": ["openclaw"],
+        "binary_names": ["moltbot", "clawdbot", "openclaw"],
+        "macos_log_subsystem": "bot.molt",  # macOS unified logging subsystem
     },
     "moltbot": {
         "config_paths": [
-            "~/.moltbot/config.json",
-            "~/.moltbot/config.yaml",
-            "~/.moltbot/config.yml",
             "~/.moltbot/moltbot.json",
-            "~/.moltbot/moltbot.yaml",
-            "~/.moltbot/moltbot.yml",
+            "~/.moltbot/clawdbot.json",
+            "~/.clawdbot/moltbot.json",
+            "~/.clawdbot/clawdbot.json",
             "~/.config/moltbot/config.json",
-            "~/.config/moltbot/config.yaml",
-            "~/.config/moltbot/config.yml",
-            "~/.config/moltbot/settings.json",
-            "~/.config/moltbot/settings.yaml",
-            "~/.config/moltbot/settings.yml",
-            "/etc/moltbot/config.yaml",
-            "/etc/moltbot/config.yml",
         ],
         "log_paths": [
+            "/tmp/moltbot-gateway.log",
+            "/tmp/clawdbot-gateway.log",
             "~/.moltbot/logs/*.log",
-            "~/.moltbot/*.log",
-            "/var/log/moltbot/*.log",
+            "~/.clawdbot/logs/*.log",
         ],
-        "workspace_path": "~/.moltbot/workspace",
-        "process_names": ["moltbot", "moltbot-agent", "moltbot-daemon"],
-        "default_port": 18800,
+        "workspace_path": "~/.moltbot",
+        # Specific process patterns - avoid generic 'node'
+        "process_names": ["moltbot gateway", "moltbot-gateway", "clawdbot gateway", "clawdbot-gateway"],
+        "default_port": 18789,
         "binary_names": ["moltbot"],
+        "macos_log_subsystem": "bot.molt",
     },
     "clawbot": {
+        # clawbot/clawdbot is the legacy name for moltbot
         "config_paths": [
+            "~/.clawdbot/clawdbot.json",
+            "~/.clawdbot/moltbot.json",
+            "~/.moltbot/clawdbot.json",
+            "~/.moltbot/moltbot.json",
             "~/.clawbot/config.json",
-            "~/.clawbot/config.yaml",
-            "~/.clawbot/config.yml",
-            "~/.clawbot/clawbot.json",
-            "~/.clawbot/clawbot.yaml",
-            "~/.clawbot/clawbot.yml",
             "~/.config/clawbot/config.json",
-            "~/.config/clawbot/config.yaml",
-            "~/.config/clawbot/config.yml",
-            "~/.config/clawbot/settings.json",
-            "~/.config/clawbot/settings.yaml",
-            "~/.config/clawbot/settings.yml",
-            "/etc/clawbot/config.yaml",
-            "/etc/clawbot/config.yml",
         ],
         "log_paths": [
+            "/tmp/moltbot-gateway.log",
+            "/tmp/clawdbot-gateway.log",
+            "~/.clawdbot/logs/*.log",
+            "~/.moltbot/logs/*.log",
             "~/.clawbot/logs/*.log",
-            "~/.clawbot/*.log",
-            "/var/log/clawbot/*.log",
         ],
-        "workspace_path": "~/.clawbot/workspace",
-        "process_names": ["clawbot", "clawbot-agent", "clawbot-daemon"],
-        "default_port": 18801,
-        "binary_names": ["clawbot"],
+        "workspace_path": "~/.clawdbot",
+        # Specific process patterns - avoid generic 'node'
+        "process_names": ["clawdbot gateway", "clawdbot-gateway", "moltbot gateway", "moltbot-gateway"],
+        "default_port": 18789,
+        "binary_names": ["clawdbot", "clawbot", "moltbot"],
+        "macos_log_subsystem": "bot.molt",
     },
 }
 
@@ -449,6 +446,9 @@ class InstallationTracker:
     def _check_process_running(self, process_names: List[str]) -> List[Dict[str, Any]]:
         """Check if any of the specified processes are running."""
         running_processes = []
+        # Patterns to exclude (our own script, grep, etc.)
+        exclude_patterns = ["installation_tracker", "grep", "ps aux"]
+
         try:
             result = subprocess.run(
                 ["ps", "aux"],
@@ -458,8 +458,14 @@ class InstallationTracker:
             )
             if result.returncode == 0:
                 for line in result.stdout.split("\n"):
+                    line_lower = line.lower()
+
+                    # Skip excluded patterns
+                    if any(excl in line_lower for excl in exclude_patterns):
+                        continue
+
                     for proc_name in process_names:
-                        if proc_name in line.lower() and "grep" not in line.lower():
+                        if proc_name.lower() in line_lower:
                             parts = line.split()
                             if len(parts) >= 11:
                                 running_processes.append({
@@ -851,6 +857,78 @@ class InstallationTracker:
 
         return {"name": "Unknown", "category": "Unknown"}
 
+    def _read_macos_unified_log(self, subsystem: str, max_lines: int = 500, time_range: str = "1h") -> List[str]:
+        """Read logs from macOS unified logging system.
+
+        Args:
+            subsystem: The log subsystem (e.g., 'bot.molt' for moltbot)
+            max_lines: Maximum lines to return
+            time_range: Time range like '1h', '30m', '1d'
+
+        Returns:
+            List of log lines
+        """
+        import platform
+        if platform.system() != "Darwin":
+            return []
+
+        try:
+            # Try without sudo first (may have limited data)
+            cmd = [
+                "log", "show",
+                "--predicate", f'subsystem == "{subsystem}"',
+                "--last", time_range,
+                "--info"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                # Filter out header lines and empty lines
+                log_lines = [l for l in lines if l.strip() and not l.startswith('Filtering')]
+                return log_lines[-max_lines:] if len(log_lines) > max_lines else log_lines
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+        return []
+
+    def _parse_macos_log_for_integrations(self, tool_name: str) -> Dict[str, Any]:
+        """Parse macOS unified log for integration/connection info.
+
+        Returns dictionary with connections, integrations, accessed services.
+        """
+        result = {
+            "log_source": "macos_unified_log",
+            "connections": [],
+            "accessed_apps": [],
+            "integrations": []
+        }
+
+        config = TOOL_CONFIGS.get(tool_name, {})
+        subsystem = config.get("macos_log_subsystem")
+
+        if not subsystem:
+            return result
+
+        log_lines = self._read_macos_unified_log(subsystem, max_lines=1000, time_range="24h")
+
+        if not log_lines:
+            return result
+
+        # Write to temp file and parse using existing methods
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
+            f.write('\n'.join(log_lines))
+            temp_log_path = f.name
+
+        try:
+            result["connections"] = self._parse_log_connections(temp_log_path)
+            result["accessed_apps"] = self._parse_log_for_accessed_apps(temp_log_path)
+        finally:
+            os.unlink(temp_log_path)
+
+        return result
+
     def _aggregate_accessed_apps(self, apps: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Aggregate accessed apps into a summary with statistics."""
         summary = {
@@ -1187,6 +1265,16 @@ class InstallationTracker:
         for log_file in log_files[:5]:  # Parse top 5 most recent logs
             accessed = self._parse_log_for_accessed_apps(log_file)
             all_accessed_apps.extend(accessed)
+
+        # Also try to read macOS unified logs (for moltbot/clawbot on macOS)
+        macos_log_data = self._parse_macos_log_for_integrations(tool_name)
+        if macos_log_data.get("connections"):
+            result["connections"].extend(macos_log_data["connections"])
+        if macos_log_data.get("accessed_apps"):
+            all_accessed_apps.extend(macos_log_data["accessed_apps"])
+        if macos_log_data.get("log_source"):
+            result["log_sources"] = result.get("log_sources", [])
+            result["log_sources"].append(macos_log_data["log_source"])
 
         result["accessed_apps"] = all_accessed_apps
         result["accessed_apps_summary"] = self._aggregate_accessed_apps(all_accessed_apps)
