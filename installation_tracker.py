@@ -1030,6 +1030,176 @@ class InstallationTracker:
 
         return output
 
+    def generate_access_report(self, as_json: bool = False) -> str:
+        """Generate a focused report on accessed apps and servers based on events."""
+        if not self.results:
+            self.scan_all()
+
+        # Collect all accessed apps across all tools
+        all_apps = []
+        all_events = []
+
+        for tool_name, tool_data in self.results.get("tools", {}).items():
+            for app in tool_data.get("accessed_apps", []):
+                app["source_tool"] = tool_name
+                all_events.append(app)
+
+            for svc in tool_data.get("accessed_apps_summary", {}).get("unique_services", []):
+                svc["source_tool"] = tool_name
+                all_apps.append(svc)
+
+        # Aggregate by resource across all tools
+        aggregated = {}
+        for app in all_apps:
+            resource = app.get("resource", "")
+            if resource not in aggregated:
+                aggregated[resource] = {
+                    "resource": resource,
+                    "service_name": app.get("service_name"),
+                    "category": app.get("category", "Unknown"),
+                    "total_access_count": 0,
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "access_types": set(),
+                    "source_tools": set(),
+                    "first_seen": app.get("first_seen"),
+                    "last_seen": app.get("last_seen"),
+                }
+            aggregated[resource]["total_access_count"] += app.get("access_count", 0)
+            aggregated[resource]["success_count"] += app.get("success_count", 0)
+            aggregated[resource]["failure_count"] += app.get("failure_count", 0)
+            aggregated[resource]["access_types"].update(app.get("access_types", []))
+            aggregated[resource]["source_tools"].add(app.get("source_tool", ""))
+
+        # Convert sets to lists for JSON
+        for item in aggregated.values():
+            item["access_types"] = list(item["access_types"])
+            item["source_tools"] = list(item["source_tools"])
+
+        # Sort by access count
+        sorted_apps = sorted(aggregated.values(), key=lambda x: x["total_access_count"], reverse=True)
+
+        # Group by category
+        by_category = {}
+        for app in sorted_apps:
+            cat = app.get("category", "Unknown")
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(app)
+
+        # Calculate stats
+        stats = {
+            "total_unique_resources": len(sorted_apps),
+            "total_events": len(all_events),
+            "successful_accesses": sum(a.get("success_count", 0) for a in sorted_apps),
+            "failed_accesses": sum(a.get("failure_count", 0) for a in sorted_apps),
+            "categories": list(by_category.keys()),
+        }
+
+        report_data = {
+            "report_type": "accessed_apps_and_servers",
+            "generated_at": datetime.now().isoformat(),
+            "statistics": stats,
+            "by_category": by_category,
+            "all_resources": sorted_apps,
+            "recent_events": all_events[-100:],  # Last 100 events
+        }
+
+        if as_json:
+            return json.dumps(report_data, indent=2, default=str)
+
+        # Generate text report
+        lines = [
+            "=" * 70,
+            "ACCESSED APPS AND SERVERS REPORT",
+            f"Generated: {report_data['generated_at']}",
+            "=" * 70,
+            "",
+            "SUMMARY:",
+            f"  Total Unique Resources: {stats['total_unique_resources']}",
+            f"  Total Access Events: {stats['total_events']}",
+            f"  Successful Accesses: {stats['successful_accesses']}",
+            f"  Failed Accesses: {stats['failed_accesses']}",
+            f"  Categories: {', '.join(stats['categories'])}",
+            "",
+        ]
+
+        # List by category
+        for category in sorted(by_category.keys()):
+            apps = by_category[category]
+            lines.append("=" * 70)
+            lines.append(f"[{category.upper()}] - {len(apps)} resource(s)")
+            lines.append("=" * 70)
+
+            for app in apps:
+                resource = app.get("resource", "N/A")
+                service_name = app.get("service_name", "")
+                access_count = app.get("total_access_count", 0)
+                success = app.get("success_count", 0)
+                failure = app.get("failure_count", 0)
+                access_types = ", ".join(app.get("access_types", []))
+                tools = ", ".join(app.get("source_tools", []))
+
+                lines.append("")
+                lines.append(f"  Resource: {resource}")
+                if service_name and service_name != "Unknown":
+                    lines.append(f"  Service:  {service_name}")
+                lines.append(f"  Access Count: {access_count} (success: {success}, failed: {failure})")
+                if access_types:
+                    lines.append(f"  Access Types: {access_types}")
+                if tools:
+                    lines.append(f"  Source Tools: {tools}")
+                lines.append("  " + "-" * 40)
+
+            lines.append("")
+
+        # Recent events section
+        if all_events:
+            lines.append("=" * 70)
+            lines.append("RECENT ACCESS EVENTS (last 20)")
+            lines.append("=" * 70)
+
+            for event in all_events[-20:]:
+                resource = event.get("resource", "N/A")
+                status = event.get("status", "unknown")
+                access_type = event.get("access_type", "N/A")
+                timestamp = event.get("timestamp", "N/A")
+                tool = event.get("source_tool", "N/A")
+
+                status_icon = "✓" if status == "success" else "✗" if status == "failed" else "?"
+                lines.append(f"  [{status_icon}] {resource[:50]}")
+                lines.append(f"      Type: {access_type} | Status: {status} | Tool: {tool}")
+                if timestamp:
+                    lines.append(f"      Time: {timestamp}")
+                lines.append("")
+
+        return "\n".join(lines)
+
+    def get_accessed_apps_list(self) -> List[Dict[str, Any]]:
+        """Get a simple list of all accessed apps/servers."""
+        if not self.results:
+            self.scan_all()
+
+        apps_list = []
+        seen = set()
+
+        for tool_name, tool_data in self.results.get("tools", {}).items():
+            for svc in tool_data.get("accessed_apps_summary", {}).get("unique_services", []):
+                resource = svc.get("resource", "")
+                if resource and resource not in seen:
+                    seen.add(resource)
+                    apps_list.append({
+                        "resource": resource,
+                        "service_name": svc.get("service_name"),
+                        "category": svc.get("category"),
+                        "access_count": svc.get("access_count", 0),
+                        "success_count": svc.get("success_count", 0),
+                        "failure_count": svc.get("failure_count", 0),
+                        "source_tool": tool_name,
+                    })
+
+        return sorted(apps_list, key=lambda x: x["access_count"], reverse=True)
+
 
 def main():
     """Main entry point."""
@@ -1057,6 +1227,14 @@ Examples:
 
   # Save to file
   python installation_tracker.py --tools openclaw moltbot -o report.json --json
+
+  # List accessed apps and servers (focused report)
+  python installation_tracker.py --access-report
+  python installation_tracker.py --access-report --json
+
+  # Simple list of accessed resources
+  python installation_tracker.py --list-accessed
+  python installation_tracker.py --list-accessed --json
         """
     )
     parser.add_argument(
@@ -1089,6 +1267,16 @@ Examples:
         action="store_true",
         help="List all predefined tools and exit"
     )
+    parser.add_argument(
+        "--access-report",
+        action="store_true",
+        help="Generate a focused report on accessed apps and servers"
+    )
+    parser.add_argument(
+        "--list-accessed",
+        action="store_true",
+        help="Output a simple list of accessed apps/servers"
+    )
 
     args = parser.parse_args()
 
@@ -1111,18 +1299,43 @@ Examples:
     elif args.tool:
         tools_to_scan = [args.tool]
 
-    # Perform scan
-    if tools_to_scan and len(tools_to_scan) == 1:
-        # Single tool scan
-        tool_name = tools_to_scan[0]
-        if tool_name in TOOL_CONFIGS:
-            result = tracker.scan_tool(tool_name)
+    # Perform scan first
+    tracker.scan_all(tools=tools_to_scan)
+
+    # Generate appropriate output
+    if args.access_report:
+        # Focused report on accessed apps/servers
+        output = tracker.generate_access_report(as_json=args.json)
+    elif args.list_accessed:
+        # Simple list of accessed apps/servers
+        apps_list = tracker.get_accessed_apps_list()
+        if args.json:
+            output = json.dumps(apps_list, indent=2, default=str)
         else:
-            result = tracker.scan_custom_tool(tool_name)
+            lines = [
+                "ACCESSED APPS AND SERVERS LIST",
+                "=" * 50,
+                ""
+            ]
+            if apps_list:
+                for app in apps_list:
+                    status = f"✓{app['success_count']}" if app['success_count'] else ""
+                    if app['failure_count']:
+                        status += f" ✗{app['failure_count']}"
+                    category = f"[{app['category']}]" if app['category'] else ""
+                    lines.append(f"  {app['resource']}")
+                    lines.append(f"    {category} Count: {app['access_count']} {status}")
+                    lines.append("")
+            else:
+                lines.append("  No accessed apps/servers found in logs.")
+            output = "\n".join(lines)
+    elif tools_to_scan and len(tools_to_scan) == 1:
+        # Single tool scan - output just that tool's data
+        tool_name = tools_to_scan[0]
+        result = tracker.results.get("tools", {}).get(tool_name, {})
         output = json.dumps(result, indent=2, default=str)
     else:
-        # Multiple tools or all tools
-        tracker.scan_all(tools=tools_to_scan)
+        # Full report
         if args.json:
             output = tracker.export_json()
         else:
