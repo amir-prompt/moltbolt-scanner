@@ -1,0 +1,20 @@
+[project]
+name = "moltbolt-scanner"
+version = "0.1.0"
+description = "OpenClaw/Moltbot installation detection and analysis tool"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6.0"]
+dev = ["pylint>=3.0", "mypy>=1.0"]
+
+[project.scripts]
+moltbolt-scanner = "installation_tracker:main"
+
+[tool.setuptools]
+py-modules = ["installation_tracker", "openclaw_cli_scanner"]
+packages = ["platform_compat"]
+
+[tool.pylint.messages_control]
+disable = ["line-too-long", "too-many-locals", "too-many-branches"]

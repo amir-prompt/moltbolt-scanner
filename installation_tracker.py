@@ -4,15 +4,32 @@ Installation Tracker for clawbot/moltbot/openclaw
 Detects installations, active status, and connection resources.
 """
 
+import argparse
+import glob
 import json
 import os
+import platform
 import re
+import shutil
 import socket
 import subprocess
-import glob
-from pathlib import Path
+import tempfile
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Any, Dict, List, Optional
+
+from platform_compat import compat
+from structures import (
+    AccessedApp,
+    AccessedAppsSummary,
+    ApiKeyInfo,
+    Integration,
+    ScanResult,
+    ServiceStats,
+    SkillInfo,
+    ToolConfig,
+    WorkspaceLibrary,
+)
+
 
 # Try to import yaml, fallback to basic parsing if not available
 try:
@@ -213,7 +230,7 @@ KNOWN_SERVICES = {
 # - Config files: moltbot.json or clawdbot.json in state dir
 # - Logs: macOS unified log (subsystem: bot.molt) + /tmp/moltbot-gateway.log
 # - Default port: 18789
-TOOL_CONFIGS = {
+TOOL_CONFIGS: Dict[str, ToolConfig] = {
     "openclaw": {
         # openclaw is the same as moltbot (different branding)
         "config_paths": [
@@ -298,130 +315,14 @@ class InstallationTracker:
         """Get the current system username."""
         return os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"
 
-    def _get_machine_user_info(self) -> Dict[str, Any]:
-        """Get detailed user information from local machine settings."""
-        user_info = {
-            "username": self.username,
-            "home_directory": os.path.expanduser("~"),
-            "user_id": None,
-            "group_id": None,
-            "full_name": None,
-            "shell": os.environ.get("SHELL", "unknown"),
-            "groups": [],
-        }
-
-        # Get user ID
-        try:
-            result = subprocess.run(["id", "-u"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                user_info["user_id"] = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        # Get group ID
-        try:
-            result = subprocess.run(["id", "-g"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                user_info["group_id"] = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        # Get full name (macOS specific with id -F)
-        try:
-            result = subprocess.run(["id", "-F"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                user_info["full_name"] = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        # Fallback: Try dscl for macOS to get real name
-        if not user_info["full_name"]:
-            try:
-                result = subprocess.run(
-                    ["dscl", ".", "-read", f"/Users/{self.username}", "RealName"],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split("\n")
-                    if len(lines) > 1:
-                        user_info["full_name"] = lines[1].strip()
-                    elif lines:
-                        user_info["full_name"] = lines[0].replace("RealName:", "").strip()
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                pass
-
-        # Fallback for Linux: Try getent
-        if not user_info["full_name"]:
-            try:
-                result = subprocess.run(
-                    ["getent", "passwd", self.username],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    parts = result.stdout.strip().split(":")
-                    if len(parts) >= 5:
-                        user_info["full_name"] = parts[4].split(",")[0]
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                pass
-
-        # Get user groups
-        try:
-            result = subprocess.run(["groups"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                user_info["groups"] = result.stdout.strip().split()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        # Get additional system info
-        try:
-            result = subprocess.run(["uname", "-a"], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                user_info["system_info"] = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        # Get computer name (macOS)
-        try:
-            result = subprocess.run(
-                ["scutil", "--get", "ComputerName"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                user_info["computer_name"] = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        # Get local hostname (macOS)
-        try:
-            result = subprocess.run(
-                ["scutil", "--get", "LocalHostName"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                user_info["local_hostname"] = result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        return user_info
-
     def _expand_path(self, path: str) -> str:
         """Expand ~ and environment variables in path."""
         return os.path.expanduser(os.path.expandvars(path))
 
     def _check_binary_installed(self, binary_name: str) -> Optional[str]:
         """Check if a binary is installed and return its path."""
-        try:
-            result = subprocess.run(
-                ["which", binary_name],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-        return None
+        # Use shutil.which for cross-platform binary lookup
+        return shutil.which(binary_name)
 
     def _check_npm_package(self, package_name: str) -> Optional[Dict[str, str]]:
         """Check if an npm package is installed globally."""
@@ -442,43 +343,6 @@ class InstallationTracker:
         except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
             pass
         return None
-
-    def _check_process_running(self, process_names: List[str]) -> List[Dict[str, Any]]:
-        """Check if any of the specified processes are running."""
-        running_processes = []
-        # Patterns to exclude (our own script, grep, etc.)
-        exclude_patterns = ["installation_tracker", "grep", "ps aux"]
-
-        try:
-            result = subprocess.run(
-                ["ps", "aux"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if result.returncode == 0:
-                for line in result.stdout.split("\n"):
-                    line_lower = line.lower()
-
-                    # Skip excluded patterns
-                    if any(excl in line_lower for excl in exclude_patterns):
-                        continue
-
-                    for proc_name in process_names:
-                        if proc_name.lower() in line_lower:
-                            parts = line.split()
-                            if len(parts) >= 11:
-                                running_processes.append({
-                                    "user": parts[0],
-                                    "pid": parts[1],
-                                    "cpu": parts[2],
-                                    "mem": parts[3],
-                                    "command": " ".join(parts[10:]),
-                                    "process_name": proc_name
-                                })
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-        return running_processes
 
     def _check_port_listening(self, port: int) -> bool:
         """Check if a port is listening."""
@@ -508,7 +372,8 @@ class InstallationTracker:
                     content = re.sub(r'//.*?\n', '\n', content)
                     content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
                     content = re.sub(r',(\s*[}\]])', r'\1', content)
-                    return json.loads(content)
+                    parsed: Dict[str, Any] = json.loads(content)
+                    return parsed
             except (json.JSONDecodeError, IOError) as e:
                 return {"_error": str(e), "_path": expanded_path}
         return None
@@ -530,9 +395,9 @@ class InstallationTracker:
 
     def _basic_yaml_parse(self, content: str, filepath: str) -> Dict[str, Any]:
         """Basic YAML parser for simple configs when PyYAML is not available."""
-        result = {"_warning": "PyYAML not installed, using basic parser", "_path": filepath}
-        current_dict = result
-        indent_stack = [(0, result)]
+        result: Dict[str, Any] = {"_warning": "PyYAML not installed, using basic parser", "_path": filepath}
+        current_dict: Dict[str, Any] = result
+        indent_stack: List[tuple[int, Dict[str, Any]]] = [(0, result)]
 
         for line in content.split('\n'):
             # Skip comments and empty lines
@@ -545,9 +410,9 @@ class InstallationTracker:
 
             # Find the key-value pair
             if ':' in stripped:
-                key, _, value = stripped.partition(':')
+                key, _, value_str = stripped.partition(':')
                 key = key.strip()
-                value = value.strip()
+                value: Any = value_str.strip()
 
                 # Remove quotes from value
                 if value and value[0] in '"\'':
@@ -578,7 +443,7 @@ class InstallationTracker:
                     current_dict[key] = value
                 else:
                     # Nested dict
-                    new_dict = {}
+                    new_dict: Dict[str, Any] = {}
                     current_dict[key] = new_dict
                     indent_stack.append((indent + 1, new_dict))
 
@@ -629,9 +494,9 @@ class InstallationTracker:
 
         return unique_connections
 
-    def _parse_log_for_accessed_apps(self, log_file: str, max_lines: int = 2000) -> List[Dict[str, Any]]:
+    def _parse_log_for_accessed_apps(self, log_file: str, max_lines: int = 2000) -> List[AccessedApp]:
         """Parse log file to identify apps/services accessed or attempted to access."""
-        accessed_apps = []
+        accessed_apps: List[AccessedApp] = []
 
         # Patterns for identifying access attempts and their status
         access_patterns = [
@@ -820,17 +685,18 @@ class InstallationTracker:
                             # Categorize the service
                             service_info = self._categorize_service(match)
 
-                            accessed_apps.append({
+                            app_entry: AccessedApp = {
                                 "resource": match,
                                 "access_type": access_type,
                                 "status": status,
                                 "timestamp": timestamp,
                                 "service_name": service_info.get("name"),
-                                "service_category": service_info.get("category"),
+                                "service_category": service_info.get("category", "Unknown"),
                                 "log_file": log_file,
                                 "line_number": line_num + 1,
                                 "line_sample": line.strip()[:150]
-                            })
+                            }
+                            accessed_apps.append(app_entry)
 
         except IOError:
             pass
@@ -857,66 +723,40 @@ class InstallationTracker:
 
         return {"name": "Unknown", "category": "Unknown"}
 
-    def _read_macos_unified_log(self, subsystem: str, max_lines: int = 500, time_range: str = "1h") -> List[str]:
-        """Read logs from macOS unified logging system.
+    def _parse_system_log_for_integrations(self, tool_name: str) -> Dict[str, Any]:
+        """Parse system log for integration/connection info.
 
-        Args:
-            subsystem: The log subsystem (e.g., 'bot.molt' for moltbot)
-            max_lines: Maximum lines to return
-            time_range: Time range like '1h', '30m', '1d'
-
-        Returns:
-            List of log lines
-        """
-        import platform
-        if platform.system() != "Darwin":
-            return []
-
-        try:
-            # Try without sudo first (may have limited data)
-            cmd = [
-                "log", "show",
-                "--predicate", f'subsystem == "{subsystem}"',
-                "--last", time_range,
-                "--info"
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                # Filter out header lines and empty lines
-                log_lines = [l for l in lines if l.strip() and not l.startswith('Filtering')]
-                return log_lines[-max_lines:] if len(log_lines) > max_lines else log_lines
-        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-            pass
-
-        return []
-
-    def _parse_macos_log_for_integrations(self, tool_name: str) -> Dict[str, Any]:
-        """Parse macOS unified log for integration/connection info.
+        Uses platform compat layer to read system logs:
+        - macOS: unified log via 'log show'
+        - Linux: journalctl
 
         Returns dictionary with connections, integrations, accessed services.
         """
-        result = {
-            "log_source": "macos_unified_log",
+        if platform.system() == "Darwin":
+            log_source = "macos_unified_log"
+        else:
+            log_source = "linux_journalctl"
+
+        result: Dict[str, Any] = {
+            "log_source": log_source,
             "connections": [],
             "accessed_apps": [],
             "integrations": []
         }
 
-        config = TOOL_CONFIGS.get(tool_name, {})
-        subsystem = config.get("macos_log_subsystem")
+        config: ToolConfig = TOOL_CONFIGS.get(tool_name, {})
+        subsystem = config.get("macos_log_subsystem")  # Also used as systemd unit on Linux
 
         if not subsystem:
             return result
 
-        log_lines = self._read_macos_unified_log(subsystem, max_lines=1000, time_range="24h")
+        # Use compat layer to read system log (cross-platform)
+        log_lines = compat.read_system_log(subsystem, time_range="24h", max_lines=1000)
 
         if not log_lines:
             return result
 
         # Write to temp file and parse using existing methods
-        import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
             f.write('\n'.join(log_lines))
             temp_log_path = f.name
@@ -929,17 +769,19 @@ class InstallationTracker:
 
         return result
 
-    def _aggregate_accessed_apps(self, apps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _aggregate_accessed_apps(self, apps: List[AccessedApp]) -> AccessedAppsSummary:
         """Aggregate accessed apps into a summary with statistics."""
-        summary = {
+        by_category: Dict[str, List[ServiceStats]] = {}
+        unique_services: List[ServiceStats] = []
+        summary: AccessedAppsSummary = {
             "total_access_events": len(apps),
-            "by_category": {},
+            "by_category": by_category,
             "by_status": {"success": 0, "failed": 0, "attempted": 0, "unknown": 0},
-            "unique_services": [],
+            "unique_services": unique_services,
             "access_timeline": [],
         }
 
-        seen_services = {}
+        seen_services: Dict[str, ServiceStats] = {}
 
         for app in apps:
             # Count by status
@@ -949,8 +791,8 @@ class InstallationTracker:
 
             # Group by category
             category = app.get("service_category", "Unknown")
-            if category not in summary["by_category"]:
-                summary["by_category"][category] = []
+            if category not in by_category:
+                by_category[category] = []
 
             # Track unique services per category
             resource = app.get("resource", "")
@@ -966,13 +808,15 @@ class InstallationTracker:
                     "failure_count": 0,
                     "first_seen": app.get("timestamp"),
                     "last_seen": app.get("timestamp"),
-                    "access_types": set(),
+                    "access_types": [],
                 }
-                summary["by_category"][category].append(seen_services[service_key])
+                by_category[category].append(seen_services[service_key])
 
             # Update service stats
             seen_services[service_key]["access_count"] += 1
-            seen_services[service_key]["access_types"].add(app.get("access_type", "unknown"))
+            access_type = app.get("access_type", "unknown")
+            if access_type not in seen_services[service_key]["access_types"]:
+                seen_services[service_key]["access_types"].append(access_type)
             if status == "success":
                 seen_services[service_key]["success_count"] += 1
             elif status == "failed":
@@ -980,19 +824,18 @@ class InstallationTracker:
             if app.get("timestamp"):
                 seen_services[service_key]["last_seen"] = app.get("timestamp")
 
-        # Convert sets to lists for JSON serialization
+        # Build unique_services list
         for service in seen_services.values():
-            service["access_types"] = list(service["access_types"])
-            summary["unique_services"].append(service)
+            unique_services.append(service)
 
         # Sort unique services by access count
-        summary["unique_services"].sort(key=lambda x: x["access_count"], reverse=True)
+        unique_services.sort(key=lambda x: x["access_count"], reverse=True)
 
         return summary
 
-    def _extract_integrations_from_config(self, config: Dict[str, Any], tool_name: str) -> List[Dict[str, Any]]:
+    def _extract_integrations_from_config(self, config: Dict[str, Any], tool_name: str) -> List[Integration]:
         """Extract integrations/channels from tool configuration."""
-        integrations = []
+        integrations: List[Integration] = []
 
         if not isinstance(config, dict):
             return integrations
@@ -1000,7 +843,7 @@ class InstallationTracker:
         # OpenClaw specific: channels.* configuration
         if "channels" in config and isinstance(config["channels"], dict):
             for channel_name, channel_config in config["channels"].items():
-                integration = {
+                integration: Integration = {
                     "name": channel_name,
                     "type": "channel",
                     "source": f"{tool_name} config",
@@ -1048,7 +891,7 @@ class InstallationTracker:
             "connections", "services", "providers", "webhooks"
         ]
 
-        def search_integrations(d: Dict, path: str = ""):
+        def search_integrations(d: Dict[str, Any], path: str = "") -> None:
             for key, value in d.items():
                 current_path = f"{path}.{key}" if path else key
                 key_lower = key.lower()
@@ -1075,8 +918,9 @@ class InstallationTracker:
                                     "config": {}
                                 })
                             elif isinstance(item, dict):
+                                item_name = item.get("name") or item.get("id") or "unknown"
                                 integrations.append({
-                                    "name": item.get("name", item.get("id", "unknown")),
+                                    "name": item_name,
                                     "type": key_lower,
                                     "source": f"{tool_name} config ({current_path})",
                                     "enabled": item.get("enabled", True),
@@ -1122,9 +966,9 @@ class InstallationTracker:
         search_integrations(config)
         return integrations
 
-    def _scan_skills_directory(self, workspace_path: str) -> List[Dict[str, Any]]:
+    def _scan_skills_directory(self, workspace_path: str) -> List[SkillInfo]:
         """Scan for installed skills/plugins in workspace directory."""
-        skills = []
+        skills: List[SkillInfo] = []
         skills_path = os.path.join(self._expand_path(workspace_path), "skills")
 
         if os.path.exists(skills_path):
@@ -1132,7 +976,7 @@ class InstallationTracker:
                 for skill_name in os.listdir(skills_path):
                     skill_dir = os.path.join(skills_path, skill_name)
                     if os.path.isdir(skill_dir):
-                        skill_info = {
+                        skill_info: SkillInfo = {
                             "name": skill_name,
                             "type": "skill",
                             "path": skill_dir,
@@ -1150,7 +994,7 @@ class InstallationTracker:
 
         return skills
 
-    def _parse_tools_md(self, tools_md_path: str) -> List[Dict[str, Any]]:
+    def _parse_tools_md(self, tools_md_path: str) -> List[Integration]:
         """Parse a TOOLS.md file for user-defined integrations/tools.
 
         TOOLS.md contains user-specific notes about:
@@ -1158,7 +1002,7 @@ class InstallationTracker:
         - Device nicknames, custom configurations
         - Environment-specific settings
         """
-        integrations = []
+        integrations: List[Integration] = []
 
         if not os.path.exists(tools_md_path):
             return integrations
@@ -1168,8 +1012,8 @@ class InstallationTracker:
                 content = f.read()
 
             # Parse markdown sections for integrations
-            current_section = None
-            section_items = []
+            current_section: Optional[str] = None
+            section_items: List[Dict[str, str]] = []
 
             for line in content.split('\n'):
                 line = line.strip()
@@ -1226,7 +1070,7 @@ class InstallationTracker:
 
         return integrations
 
-    def _scan_workspace_library(self, tool_name: str) -> Dict[str, Any]:
+    def _scan_workspace_library(self, tool_name: str) -> WorkspaceLibrary:
         """Scan the workspace library for connected apps and integrations.
 
         Scans:
@@ -1239,7 +1083,7 @@ class InstallationTracker:
         - MCP servers configuration
         - OAuth credentials
         """
-        result = {
+        result: WorkspaceLibrary = {
             "connected_apps": [],
             "channels": [],
             "skills": [],
@@ -1270,12 +1114,12 @@ class InstallationTracker:
                 tools_integrations = self._parse_tools_md(tools_md_path)
                 result["tools_md_integrations"].extend(tools_integrations)
                 for intg in tools_integrations:
-                    result["connected_apps"].append({
+                    connected_app: Integration = {
                         "name": intg["name"],
-                        "type": f"tools_md_{intg['type']}",
+                        "type": f"tools_md_{intg.get('type', 'unknown')}",
                         "source": tools_md_path,
-                        "details": intg
-                    })
+                    }
+                    result["connected_apps"].append(connected_app)
 
             # Scan skills directory
             skills_path = os.path.join(ws_path, "skills")
@@ -1283,15 +1127,15 @@ class InstallationTracker:
                 for item in os.listdir(skills_path):
                     item_path = os.path.join(skills_path, item)
                     if os.path.isdir(item_path):
-                        skill_info = self._parse_skill_or_extension(item_path, "skill")
-                        if skill_info:
-                            result["skills"].append(skill_info)
-                            result["connected_apps"].append({
-                                "name": skill_info["name"],
+                        parsed_skill = self._parse_skill_or_extension(item_path, "skill")
+                        if parsed_skill:
+                            result["skills"].append(parsed_skill)
+                            skill_app: Integration = {
+                                "name": parsed_skill["name"],
                                 "type": "skill",
                                 "source": skills_path,
-                                "details": skill_info
-                            })
+                            }
+                            result["connected_apps"].append(skill_app)
 
             # Scan extensions directory
             extensions_path = os.path.join(ws_path, "extensions")
@@ -1302,12 +1146,12 @@ class InstallationTracker:
                         ext_info = self._parse_skill_or_extension(item_path, "extension")
                         if ext_info:
                             result["extensions"].append(ext_info)
-                            result["connected_apps"].append({
+                            ext_app: Integration = {
                                 "name": ext_info["name"],
                                 "type": "extension",
                                 "source": extensions_path,
-                                "details": ext_info
-                            })
+                            }
+                            result["connected_apps"].append(ext_app)
 
             # Scan plugins directory
             plugins_path = os.path.join(ws_path, "plugins")
@@ -1318,12 +1162,12 @@ class InstallationTracker:
                         plugin_info = self._parse_skill_or_extension(item_path, "plugin")
                         if plugin_info:
                             result["plugins"].append(plugin_info)
-                            result["connected_apps"].append({
+                            plugin_app: Integration = {
                                 "name": plugin_info["name"],
                                 "type": "plugin",
                                 "source": plugins_path,
-                                "details": plugin_info
-                            })
+                            }
+                            result["connected_apps"].append(plugin_app)
 
             # Check for OAuth credentials
             creds_path = os.path.join(ws_path, "credentials")
@@ -1360,41 +1204,33 @@ class InstallationTracker:
                                         "googlechat", "imessage", "msteams", "matrix", "webchat"]
                         for ch_type in channel_types:
                             ch_config = channels_config.get(ch_type)
-                            if ch_config and ch_config.get("enabled", True) != False:
-                                ch_info = {
+                            if ch_config and ch_config.get("enabled", True) is not False:
+                                ch_info: Integration = {
                                     "name": ch_type.title(),
                                     "type": ch_type,
                                     "enabled": ch_config.get("enabled", True),
-                                    "has_token": bool(ch_config.get("token") or ch_config.get("botToken")),
+                                    "config": {"has_token": bool(ch_config.get("token") or ch_config.get("botToken"))},
                                 }
                                 result["channels"].append(ch_info)
-                                result["connected_apps"].append({
-                                    "name": ch_type.title(),
-                                    "type": "channel",
-                                    "source": config_path,
-                                    "details": ch_info
-                                })
+                                result["connected_apps"].append(ch_info)
 
                         # Extract MCP servers
                         mcp_config = config_data.get("mcpServers", {})
                         for server_name, server_config in mcp_config.items():
-                            server_info = {
-                                "name": server_name,
-                                "command": server_config.get("command", ""),
-                                "enabled": server_config.get("enabled", True),
-                            }
-                            result["mcp_servers"].append(server_info)
-                            result["connected_apps"].append({
+                            server_info: Integration = {
                                 "name": server_name,
                                 "type": "mcp_server",
                                 "source": config_path,
-                                "details": server_info
-                            })
+                                "enabled": server_config.get("enabled", True),
+                                "config": {"command": server_config.get("command", "")},
+                            }
+                            result["mcp_servers"].append(server_info)
+                            result["connected_apps"].append(server_info)
 
                         # Extract skills entries from config
                         skills_config = config_data.get("skills", {}).get("entries", {})
                         for skill_name, skill_config in skills_config.items():
-                            skill_info = {
+                            cfg_skill_info: SkillInfo = {
                                 "name": skill_name,
                                 "enabled": skill_config.get("enabled", True),
                                 "has_api_key": bool(skill_config.get("apiKey")),
@@ -1402,31 +1238,31 @@ class InstallationTracker:
                                 "has_config": bool(skill_config.get("config")),
                                 "source": config_path,
                             }
-                            result["skills_from_config"].append(skill_info)
+                            result["skills_from_config"].append(cfg_skill_info)
                             if skill_config.get("enabled", True):
-                                result["connected_apps"].append({
+                                cfg_skill_app: Integration = {
                                     "name": skill_name,
                                     "type": "skill_config",
                                     "source": config_path,
-                                    "details": skill_info
-                                })
+                                }
+                                result["connected_apps"].append(cfg_skill_app)
 
                         # Extract bundled skills allowlist
                         bundled_skills = config_data.get("skills", {}).get("allowBundled", [])
                         for skill_name in bundled_skills:
-                            result["connected_apps"].append({
+                            bundled_app: Integration = {
                                 "name": skill_name,
                                 "type": "bundled_skill",
                                 "source": config_path,
-                                "details": {"allowed": True}
-                            })
+                            }
+                            result["connected_apps"].append(bundled_app)
 
         return result
 
-    def _parse_skill_or_extension(self, path: str, item_type: str) -> Optional[Dict[str, Any]]:
+    def _parse_skill_or_extension(self, path: str, item_type: str) -> Optional[SkillInfo]:
         """Parse a skill, extension, or plugin directory."""
         name = os.path.basename(path)
-        info = {
+        info: SkillInfo = {
             "name": name,
             "type": item_type,
             "path": path,
@@ -1473,7 +1309,7 @@ class InstallationTracker:
 
         return info
 
-    def scan_available_skills(self, source_paths: List[str] = None) -> Dict[str, Any]:
+    def scan_available_skills(self, source_paths: Optional[List[str]] = None) -> Dict[str, Any]:
         """Scan openclaw/moltbot source directories for available skills.
 
         Args:
@@ -1494,16 +1330,13 @@ class InstallationTracker:
                 "/opt/openclaw",
             ]
 
-        result = {
-            "source_paths_checked": [],
-            "available_skills": [],
-            "skills_by_category": {},
-            "total_count": 0,
-        }
+        available_skills: List[SkillInfo] = []
+        skills_by_category: Dict[str, List[str]] = {}
+        source_paths_checked: List[str] = []
 
         for src_path in source_paths:
             expanded = self._expand_path(src_path)
-            result["source_paths_checked"].append(expanded)
+            source_paths_checked.append(expanded)
 
             if not os.path.exists(expanded):
                 continue
@@ -1529,22 +1362,26 @@ class InstallationTracker:
                         if os.path.exists(skill_md):
                             skill_info = self._parse_skill_md(skill_md, skill_name, skill_path)
                             if skill_info:
-                                result["available_skills"].append(skill_info)
+                                available_skills.append(skill_info)
 
                                 # Categorize by connected service
                                 for svc in skill_info.get("connected_services", []):
-                                    if svc not in result["skills_by_category"]:
-                                        result["skills_by_category"][svc] = []
-                                    result["skills_by_category"][svc].append(skill_info["name"])
+                                    if svc not in skills_by_category:
+                                        skills_by_category[svc] = []
+                                    skills_by_category[svc].append(skill_info["name"])
                 except OSError:
                     pass
 
-        result["total_count"] = len(result["available_skills"])
-        return result
+        return {
+            "source_paths_checked": source_paths_checked,
+            "available_skills": available_skills,
+            "skills_by_category": skills_by_category,
+            "total_count": len(available_skills),
+        }
 
-    def _parse_skill_md(self, skill_md_path: str, skill_name: str, skill_path: str) -> Optional[Dict[str, Any]]:
+    def _parse_skill_md(self, skill_md_path: str, skill_name: str, skill_path: str) -> Optional[SkillInfo]:
         """Parse a SKILL.md file to extract skill metadata."""
-        info = {
+        info: SkillInfo = {
             "name": skill_name,
             "path": skill_path,
             "description": None,
@@ -1580,7 +1417,6 @@ class InstallationTracker:
                             elif key == 'metadata':
                                 # Try to parse JSON metadata
                                 try:
-                                    import re
                                     # Find JSON in the value
                                     json_match = re.search(r'\{.*\}', value)
                                     if json_match:
@@ -1632,12 +1468,12 @@ class InstallationTracker:
 
         return info
 
-    def _extract_api_keys_from_config(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _extract_api_keys_from_config(self, config: Dict[str, Any]) -> List[ApiKeyInfo]:
         """Extract potential API keys from configuration."""
-        api_keys = []
+        api_keys: List[ApiKeyInfo] = []
         key_patterns = ["api_key", "apikey", "api-key", "token", "secret", "auth_token"]
 
-        def search_dict(d: Dict, path: str = ""):
+        def search_dict(d: Dict[str, Any], path: str = "") -> None:
             for k, v in d.items():
                 current_path = f"{path}.{k}" if path else k
                 if isinstance(v, dict):
@@ -1657,10 +1493,10 @@ class InstallationTracker:
             search_dict(config)
         return api_keys
 
-    def scan_tool(self, tool_name: str) -> Dict[str, Any]:
+    def scan_tool(self, tool_name: str) -> ScanResult:
         """Scan for a specific tool installation and status."""
-        config = TOOL_CONFIGS.get(tool_name, {})
-        result = {
+        config: ToolConfig = TOOL_CONFIGS.get(tool_name, {})
+        result: ScanResult = {
             "tool_name": tool_name,
             "installed": False,
             "installation_details": {},
@@ -1672,10 +1508,10 @@ class InstallationTracker:
             "connections": [],
             "api_keys_found": [],
             "accessed_apps": [],
-            "accessed_apps_summary": {},
+            "accessed_apps_summary": {"total_access_events": 0, "by_category": {}, "by_status": {}, "unique_services": [], "access_timeline": []},
             "integrations": [],
             "skills": [],
-            "workspace_library": {},  # Connected apps from workspace
+            "workspace_library": {"connected_apps": [], "channels": [], "skills": [], "skills_from_config": [], "extensions": [], "plugins": [], "mcp_servers": [], "oauth_credentials": [], "tools_md_integrations": []},
         }
 
         # Check binary installation
@@ -1699,7 +1535,7 @@ class InstallationTracker:
             result["installation_details"]["workspace_path"] = workspace_path
 
         # Check running processes
-        processes = self._check_process_running(config.get("process_names", []))
+        processes = compat.find_processes(config.get("process_names", []))
         if processes:
             result["active"] = True
             result["processes"] = processes
@@ -1757,29 +1593,29 @@ class InstallationTracker:
             result["connections"].extend(connections)
 
         # Parse logs for accessed apps/services
-        all_accessed_apps = []
+        all_accessed_apps: List[AccessedApp] = []
         for log_file in log_files[:5]:  # Parse top 5 most recent logs
             accessed = self._parse_log_for_accessed_apps(log_file)
             all_accessed_apps.extend(accessed)
 
-        # Also try to read macOS unified logs (for moltbot/clawbot on macOS)
-        macos_log_data = self._parse_macos_log_for_integrations(tool_name)
-        if macos_log_data.get("connections"):
-            result["connections"].extend(macos_log_data["connections"])
-        if macos_log_data.get("accessed_apps"):
-            all_accessed_apps.extend(macos_log_data["accessed_apps"])
-        if macos_log_data.get("log_source"):
+        # Also try to read system logs (macOS unified log / Linux journalctl)
+        system_log_data = self._parse_system_log_for_integrations(tool_name)
+        if system_log_data.get("connections"):
+            result["connections"].extend(system_log_data["connections"])
+        if system_log_data.get("accessed_apps"):
+            all_accessed_apps.extend(system_log_data["accessed_apps"])
+        if system_log_data.get("log_source"):
             result["log_sources"] = result.get("log_sources", [])
-            result["log_sources"].append(macos_log_data["log_source"])
+            result["log_sources"].append(system_log_data["log_source"])
 
         result["accessed_apps"] = all_accessed_apps
         result["accessed_apps_summary"] = self._aggregate_accessed_apps(all_accessed_apps)
 
         return result
 
-    def scan_all(self, tools: List[str] = None, include_available_skills: bool = True) -> Dict[str, Any]:
+    def scan_all(self, tools: Optional[List[str]] = None, include_available_skills: bool = True) -> Dict[str, Any]:
         """Scan for specified tools or all known tools if none specified."""
-        user_info = self._get_machine_user_info()
+        user_info = compat.get_user_info(self.username)
         self.results = {
             "scan_timestamp": datetime.now().isoformat(),
             "machine_info": {
@@ -1807,10 +1643,10 @@ class InstallationTracker:
 
         return self.results
 
-    def scan_custom_tool(self, tool_name: str) -> Dict[str, Any]:
+    def scan_custom_tool(self, tool_name: str) -> ScanResult:
         """Scan for a custom tool using generic paths based on tool name."""
         # Generate generic config paths based on tool name
-        generic_config = {
+        generic_config: ToolConfig = {
             "config_paths": [
                 f"~/.{tool_name}/config.json",
                 f"~/.{tool_name}/config.yaml",
@@ -1843,13 +1679,13 @@ class InstallationTracker:
 
         return result
 
-    def add_custom_tool(self, tool_name: str, config: Dict[str, Any] = None):
+    def add_custom_tool(self, tool_name: str, config: Optional[ToolConfig] = None) -> None:
         """Add a custom tool configuration."""
         if config:
             TOOL_CONFIGS[tool_name] = config
         else:
             # Use generic config
-            TOOL_CONFIGS[tool_name] = {
+            generic_config: ToolConfig = {
                 "config_paths": [
                     f"~/.{tool_name}/config.json",
                     f"~/.{tool_name}/config.yaml",
@@ -1867,6 +1703,7 @@ class InstallationTracker:
                 "default_port": None,
                 "binary_names": [tool_name],
             }
+            TOOL_CONFIGS[tool_name] = generic_config
 
     def generate_report(self) -> str:
         """Generate a human-readable report."""
@@ -1975,7 +1812,7 @@ class InstallationTracker:
             if ws_lib.get("tools_md_integrations"):
                 lines.append("")
                 lines.append(f"  TOOLS.MD INTEGRATIONS ({len(ws_lib['tools_md_integrations'])}):")
-                by_type = {}
+                by_type: Dict[str, List[Integration]] = {}
                 for intg in ws_lib["tools_md_integrations"]:
                     intg_type = intg.get("type", "unknown")
                     if intg_type not in by_type:
@@ -2005,14 +1842,14 @@ class InstallationTracker:
                 lines.append("")
                 lines.append(f"  ALL CONNECTED APPS ({len(ws_lib['connected_apps'])}):")
                 # Group by type
-                by_type = {}
+                apps_by_type: Dict[str, List[str]] = {}
                 for app in ws_lib["connected_apps"]:
                     app_type = app.get("type", "unknown")
-                    if app_type not in by_type:
-                        by_type[app_type] = []
-                    by_type[app_type].append(app["name"])
-                for app_type, apps in by_type.items():
-                    lines.append(f"    [{app_type}]: {', '.join(apps)}")
+                    if app_type not in apps_by_type:
+                        apps_by_type[app_type] = []
+                    apps_by_type[app_type].append(app["name"])
+                for app_type, app_names in apps_by_type.items():
+                    lines.append(f"    [{app_type}]: {', '.join(app_names)}")
 
             if tool_data["log_files"]:
                 lines.append(f"  Log Files ({len(tool_data['log_files'])}):")
@@ -2070,7 +1907,7 @@ class InstallationTracker:
 
         return "\n".join(lines)
 
-    def export_json(self, filepath: str = None) -> str:
+    def export_json(self, filepath: Optional[str] = None) -> str:
         """Export results as JSON."""
         if not self.results:
             self.scan_all()
@@ -2145,7 +1982,7 @@ class InstallationTracker:
         sorted_apps = sorted(aggregated.values(), key=lambda x: x["total_access_count"], reverse=True)
 
         # Group by category
-        by_category = {}
+        by_category: Dict[str, List[Any]] = {}
         for app in sorted_apps:
             cat = app.get("category", "Unknown")
             if cat not in by_category:
@@ -2265,7 +2102,7 @@ class InstallationTracker:
 
         return sorted(apps_list, key=lambda x: x["access_count"], reverse=True)
 
-    def auto_discover_log_files(self, tools_only: bool = False, tool_names: List[str] = None) -> List[str]:
+    def auto_discover_log_files(self, tools_only: bool = False, tool_names: Optional[List[str]] = None) -> List[str]:
         """Automatically discover log files on the system.
 
         Args:
@@ -2383,7 +2220,7 @@ class InstallationTracker:
 
     def scan_log_files(self, log_file_patterns: List[str]) -> Dict[str, Any]:
         """Scan specific log files directly for accessed apps/services."""
-        user_info = self._get_machine_user_info()
+        user_info = compat.get_user_info(self.username)
 
         # Expand glob patterns and collect all log files
         all_log_files = []
@@ -2398,7 +2235,7 @@ class InstallationTracker:
         all_log_files = sorted(set(all_log_files))
 
         # Parse all log files
-        all_accessed_apps = []
+        all_accessed_apps: List[AccessedApp] = []
         all_connections = []
 
         for log_file in all_log_files:
@@ -2440,10 +2277,8 @@ class InstallationTracker:
         return self.results
 
 
-def main():
+def main() -> None:
     """Main entry point."""
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Track tool installations (clawbot/moltbot/openclaw and custom tools)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2633,8 +2468,8 @@ Examples:
 
     # Handle --show-discovered
     if args.show_discovered:
-        tools_filter = args.tools if args.tools else (list(TOOL_CONFIGS.keys()) if args.tools_only else None)
-        if args.tools_only:
+        tools_filter: Optional[List[str]] = args.tools if args.tools else (list(TOOL_CONFIGS.keys()) if args.tools_only else None)
+        if args.tools_only and tools_filter:
             print(f"Discovering log files for tools: {', '.join(tools_filter)}...")
         else:
             print("Discovering log files...")
