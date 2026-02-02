@@ -1,0 +1,37 @@
+openclaw_usage.py
+  a6703e59b078ded0 1-269,276-345,347-355,357-369
+  2b195d652a23a478 270-275,346,356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.41",
+  "base_commit_sha": "c0b135b81a82d97e3846eda7d90a877ff7fd77ec",
+  "prompts": {
+    "2b195d652a23a478": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "89259726-5762-4a81-9392-54a907ac5846",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "Amir Barshavit <amir@prompt.security>",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 0,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    },
+    "a6703e59b078ded0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63b2fc6d-da1a-4373-8de1-228089730ecf",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "Amir Barshavit <amir@prompt.security>",
+      "messages": [],
+      "total_additions": 459,
+      "total_deletions": 249,
+      "accepted_lines": 448,
+      "overriden_lines": 0
+    }
+  }
+}
