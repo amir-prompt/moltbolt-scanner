@@ -186,7 +186,7 @@ class OpenClawCLIScanner:
             "ran": doctor_output is not None
         }
 
-    def get_config(self, paths: List[str] = None) -> Dict[str, Any]:
+    def get_config(self, paths: Optional[List[str]] = None) -> Dict[str, Any]:
         """Get configuration values for specified paths."""
         if paths is None:
             paths = [
@@ -444,7 +444,7 @@ class OpenClawCLIScanner:
 
         return "\n".join(lines)
 
-    def export_json(self, filepath: str = None) -> str:
+    def export_json(self, filepath: Optional[str] = None) -> str:
         """Export results as JSON."""
         if not self.results:
             self.scan_all()

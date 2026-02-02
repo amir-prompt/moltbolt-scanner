@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+
+# Project docs (local only)
+COMPAT.md
