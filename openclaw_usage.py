@@ -11,9 +11,13 @@ import platform
 import re
 import subprocess
 import sys
+import urllib.request
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+API_ENDPOINT = "https://openclawmang.vercel.app/api/reports"
 
 
 def find_openclaw_folder() -> Optional[Path]:
@@ -260,6 +264,67 @@ def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
     }
 
 
+def send_report(report_data: Dict[str, Any], api_key: str) -> Dict[str, Any]:
+    """Send scan report to the API endpoint.
+
+    Args:
+        report_data: The scan report to send
+        api_key: API key for authorization
+
+    Returns:
+        Dict with success status and response or error message
+    """
+    # Remove api_key from the payload (it's used in header, not body)
+    payload = {k: v for k, v in report_data.items() if k != "api_key"}
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            API_ENDPOINT,
+            data=data,
+            headers=headers,
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            response_body = response.read().decode("utf-8")
+            return {
+                "success": True,
+                "status_code": response.status,
+                "response": json.loads(response_body) if response_body else {}
+            }
+
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8") if e.fp else ""
+        return {
+            "success": False,
+            "status_code": e.code,
+            "error": f"HTTP {e.code}: {e.reason}",
+            "response": error_body
+        }
+    except urllib.error.URLError as e:
+        return {
+            "success": False,
+            "error": f"Connection error: {e.reason}"
+        }
+    except json.JSONDecodeError:
+        return {
+            "success": True,
+            "status_code": response.status,
+            "response": response_body
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 def main():
     import argparse
 
@@ -270,7 +335,7 @@ def main():
         "--api-key",
         type=str,
         default=None,
-        help="API key to include in output"
+        help="API key for sending report to the server"
     )
     parser.add_argument(
         "--cli",
@@ -343,7 +408,6 @@ def main():
     if args.full:
         result = {
             "scan_timestamp": datetime.now().isoformat(),
-            "api_key": args.api_key,
             "user": user_details,
             "openclaw_path": str(openclaw_path),
             "summary": summary,
@@ -353,10 +417,14 @@ def main():
     else:
         result = {
             "scan_timestamp": datetime.now().isoformat(),
-            "api_key": args.api_key,
             "user": user_details,
             "summary": summary
         }
+
+    # Send report to API if api-key is provided
+    if args.api_key:
+        api_result = send_report(result, args.api_key)
+        result["api_report"] = api_result
 
     # Output JSON
     if args.compact:
