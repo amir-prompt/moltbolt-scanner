@@ -1,0 +1,31 @@
+platform_compat/darwin.py
+  d8d8ccd313a16938 103-128
+openclaw_usage.py
+  d8d8ccd313a16938 17,25-31,48,52,55,57-67,274-275
+platform_compat/common.py
+  d8d8ccd313a16938 131-195
+platform_compat/base.py
+  d8d8ccd313a16938 97-117
+platform_compat/linux.py
+  d8d8ccd313a16938 6,13,101-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "f3b2bd762b266dc3f0fad6d9a3192fbc652e6bae",
+  "prompts": {
+    "d8d8ccd313a16938": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "1961399d-b05d-49d1-b2e2-b1c11d5f9db7",
+        "model": "copilot/claude-opus-4.5"
+      },
+      "human_author": "Vitaly Neyman <vitaly@prompt.security>",
+      "messages": [],
+      "total_additions": 289,
+      "total_deletions": 113,
+      "accepted_lines": 281,
+      "overriden_lines": 1
+    }
+  }
+}
