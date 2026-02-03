@@ -6,5 +6,7 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Project docs (local only)
-COMPAT.md
+# Build artifacts
+dist/
+build/
+*.spec
