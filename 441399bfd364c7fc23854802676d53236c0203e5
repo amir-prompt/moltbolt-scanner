@@ -1,0 +1,27 @@
+pyproject.toml
+  d8d8ccd313a16938 20,23-24
+.gitignore
+  d8d8ccd313a16938 9-12
+.github/workflows/release.yml
+  d8d8ccd313a16938 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "441399bfd364c7fc23854802676d53236c0203e5",
+  "prompts": {
+    "d8d8ccd313a16938": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "1961399d-b05d-49d1-b2e2-b1c11d5f9db7",
+        "model": "copilot/claude-opus-4.5"
+      },
+      "human_author": "Vitaly Neyman <vitaly@prompt.security>",
+      "messages": [],
+      "total_additions": 351,
+      "total_deletions": 11,
+      "accepted_lines": 326,
+      "overriden_lines": 1
+    }
+  }
+}
