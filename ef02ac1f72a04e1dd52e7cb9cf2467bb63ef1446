@@ -1,0 +1,31 @@
+platform_compat/common.py
+  d8d8ccd313a16938 134-135,137,140,189-192
+openclaw_usage.py
+  d8d8ccd313a16938 29,45-48,50,53,58,60,90,100-102,104-105,109,114-115,117-120,124,128,134-135,138-140,145,149-150,152-156,159,169-182,189,192,195,205-207,209-211,213-216,219-227,230-232,234-236,238-240,244,253-254,257-258,261-268,271,281-282,285-286,289-296,299,308-309,312-313,315,379,388,516-519,563,580
+other/list_active_skills.py
+  d8d8ccd313a16938 202
+platform_compat/darwin.py
+  d8d8ccd313a16938 69-70
+platform_compat/base.py
+  d8d8ccd313a16938 110,116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "ef02ac1f72a04e1dd52e7cb9cf2467bb63ef1446",
+  "prompts": {
+    "d8d8ccd313a16938": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "1961399d-b05d-49d1-b2e2-b1c11d5f9db7",
+        "model": "copilot/claude-opus-4.5"
+      },
+      "human_author": "Vitaly Neyman <vitaly@prompt.security>",
+      "messages": [],
+      "total_additions": 64,
+      "total_deletions": 62,
+      "accepted_lines": 146,
+      "overriden_lines": 3
+    }
+  }
+}
