@@ -1,0 +1,23 @@
+openclaw_usage.py
+  ba78d47dfca8d0d3 449-472,474-477
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.42",
+  "base_commit_sha": "1b56ee43cd3dda078262ba45159234a1e10cd837",
+  "prompts": {
+    "ba78d47dfca8d0d3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d8638b6-a870-41b3-bf6f-b040594293d4",
+        "model": "claude-opus-4-5-20251101"
+      },
+      "human_author": "Amir Barshavit <amir@prompt.security>",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 28,
+      "accepted_lines": 28,
+      "overriden_lines": 0
+    }
+  }
+}
