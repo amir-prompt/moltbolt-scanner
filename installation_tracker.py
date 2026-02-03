@@ -2422,7 +2422,7 @@ Examples:
             print("AVAILABLE SKILLS")
             print(f"{'='*60}")
             print(f"\nTotal skills found: {skills_result['total_count']}")
-            print(f"\nSource paths checked:")
+            print("\nSource paths checked:")
             for p in skills_result['source_paths_checked']:
                 exists = "✓" if os.path.exists(p) else "✗"
                 print(f"  [{exists}] {p}")

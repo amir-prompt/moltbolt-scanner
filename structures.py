@@ -6,6 +6,9 @@ All TypedDicts used across installation_tracker.py and platform_compat/.
 
 from typing import Any, Dict, List, Optional, TypedDict
 
+# CLI command as list of string parts (ex. ["/usr/bin/openclaw"] or ["npx", "openclaw"])
+CliCommand = List[str]
+
 
 # =============================================================================
 # Platform Compat Structures (used by platform_compat/)

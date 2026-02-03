@@ -6,8 +6,6 @@ Outputs JSON with all collected data.
 """
 
 import json
-import os
-import platform
 import subprocess
 import sys
 import urllib.request
@@ -18,8 +16,52 @@ from typing import Dict, List, Any, Optional, TypedDict
 
 from platform_compat.common import get_system_info
 from platform_compat import compat as _compat
+from structures import CliCommand
 
 API_ENDPOINT = "https://oneclaw.prompt.security/api/reports"
+
+
+class CliExecError(Exception):
+    """Raised when CLI command execution fails."""
+    pass
+
+
+def _run_cli(cli_command: Optional[CliCommand], *args: str, timeout: int = 30) -> str:
+    """Run OpenClaw CLI command and return stdout on success.
+
+    Args:
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
+        *args: Command arguments (e.g., "nodes", "list")
+        timeout: Command timeout in seconds
+
+    Returns:
+        stdout as string on success
+
+    Raises:
+        CliExecError: On any failure (not found, timeout, non-zero exit, etc.)
+    """
+    # Auto-detect CLI if not provided
+    if cli_command is None:
+        cli_command = _compat.find_openclaw_binary("openclaw")
+        if cli_command is None:
+            raise CliExecError("CLI not found")
+
+    try:
+        result = subprocess.run(cli_command + list(args), capture_output=True, text=True, timeout=timeout)
+
+        if result.returncode != 0:
+            raise CliExecError(f"Command failed: {result.stderr.strip()}")
+
+        return result.stdout
+
+    except subprocess.TimeoutExpired as e:
+        raise CliExecError("Command timed out") from e
+    except FileNotFoundError as e:
+        raise CliExecError(f"CLI not found: {' '.join(cli_command)}") from e
+    except Exception as e:
+        if isinstance(e, CliExecError):
+            raise
+        raise CliExecError(str(e)) from e
 
 
 class SkillsResult(TypedDict, total=False):
@@ -45,408 +87,232 @@ def find_openclaw_folder() -> Optional[Path]:
     return None
 
 
-def get_active_skills(cli_command: Optional[str] = None) -> SkillsResult:
+def get_active_skills(cli_command: Optional[CliCommand] = None) -> SkillsResult:
     """Run openclaw skills list and filter only active skills.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
 
     Returns:
         SkillsResult with active_skills list and counts (or error on failure)
     """
-    # Auto-detect CLI binary if not provided
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {
-                "error": "OpenClaw CLI not found. Searched: PATH, npm global, pnpm, git source, platform-specific locations.",
-                "active_skills": [],
-                "count": 0,
-                "cli_searched": True
-            }
-    
-    cmd = [cli_command, "skills", "list", "--json"]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0:
-            return {
-                "error": f"Command failed: {result.stderr}",
-                "active_skills": [],
-                "count": 0
-            }
-
-        data = json.loads(result.stdout)
-        all_skills = data.get("skills", [])
-
-        # Filter for active/eligible skills (not disabled)
-        active_skills = [
-            skill for skill in all_skills
-            if skill.get("eligible", False) and not skill.get("disabled", False)
-        ]
-
-        return {
-            "active_skills": active_skills,
-            "count": len(active_skills),
-            "total": len(all_skills)
-        }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out", "active_skills": [], "count": 0}
-    except json.JSONDecodeError as e:
-        return {"error": f"Invalid JSON: {e}", "active_skills": [], "count": 0}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}", "active_skills": [], "count": 0}
-    except Exception as e:
+        stdout = _run_cli(cli_command, "skills", "list", "--json")
+    except CliExecError as e:
         return {"error": str(e), "active_skills": [], "count": 0}
 
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return {"error": f"Invalid JSON: {e}", "active_skills": [], "count": 0}
 
-def get_cron_jobs(cli_command: Optional[str] = None) -> Dict[str, Any]:
+    all_skills = data.get("skills", [])
+
+    # Filter for active/eligible skills (not disabled)
+    active_skills = [
+        skill for skill in all_skills
+        if skill.get("eligible", False) and not skill.get("disabled", False)
+    ]
+
+    return {
+        "active_skills": active_skills,
+        "count": len(active_skills),
+        "total": len(all_skills)
+    }
+
+
+def get_cron_jobs(cli_command: Optional[CliCommand] = None) -> Dict[str, Any]:
     """Run openclaw cron list to get scheduled cron jobs.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
+        cli_command: CLI base command as list. If None, auto-detects.
 
     Returns:
         Dict with cron jobs list and count
     """
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {"error": "CLI not found", "cron_jobs": [], "count": 0}
-
-    cmd = [cli_command, "cron", "list"]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0:
-            return {
-                "error": f"Command failed: {result.stderr}",
-                "cron_jobs": [],
-                "count": 0
-            }
-
-        # Try to parse as JSON first
-        try:
-            data = json.loads(result.stdout)
-            cron_jobs = data if isinstance(data, list) else data.get("cron_jobs", data.get("jobs", []))
-            return {
-                "cron_jobs": cron_jobs,
-                "count": len(cron_jobs) if isinstance(cron_jobs, list) else 0
-            }
-        except json.JSONDecodeError:
-            # If not JSON, parse the text output
-            lines = result.stdout.strip().split("\n")
-            cron_jobs = []
-            for line in lines:
-                line = line.strip()
-                if line and not line.startswith(("#", "No cron", "CRON")):
-                    cron_jobs.append({"raw": line})
-
-            return {
-                "cron_jobs": cron_jobs,
-                "count": len(cron_jobs),
-                "raw_output": result.stdout.strip()
-            }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out", "cron_jobs": [], "count": 0}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}", "cron_jobs": [], "count": 0}
-    except Exception as e:
+        stdout = _run_cli(cli_command, "cron", "list")
+    except CliExecError as e:
         return {"error": str(e), "cron_jobs": [], "count": 0}
 
+    # Try to parse as JSON first
+    try:
+        data = json.loads(stdout)
+        cron_jobs = data if isinstance(data, list) else data.get("cron_jobs", data.get("jobs", []))
+        return {"cron_jobs": cron_jobs, "count": len(cron_jobs) if isinstance(cron_jobs, list) else 0}
+    except json.JSONDecodeError:
+        # If not JSON, parse the text output
+        lines = stdout.strip().split("\n")
+        cron_jobs = []
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith(("#", "No cron", "CRON")):
+                cron_jobs.append({"raw": line})
 
-def get_security_audit(cli_command: Optional[str] = None) -> Dict[str, Any]:
+        return {
+            "cron_jobs": cron_jobs,
+            "count": len(cron_jobs),
+            "raw_output": stdout.strip()
+        }
+
+
+def get_security_audit(cli_command: Optional[CliCommand] = None) -> Dict[str, Any]:
     """Run openclaw security audit to check for security issues.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
 
     Returns:
         Dict with security audit results
     """
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {"error": "CLI not found"}
-
-    cmd = [cli_command, "security", "audit"]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
+        stdout = _run_cli(cli_command, "security", "audit", timeout=60)
+        passed = True
+    except CliExecError as e:
+        # Security audit may return non-zero on findings - that's not an error
+        error_str = str(e)
+        if "Command failed (exit" in error_str:
+            # Extract any output from the error for parsing
+            passed = False
+            stdout = ""  # We lost the output in this case
+        else:
+            return {"error": error_str}
 
-        output = result.stdout.strip()
-        stderr = result.stderr.strip()
+    output = stdout.strip()
 
-        # Try to parse as JSON first
-        try:
-            data = json.loads(output)
-            return {
-                "audit_results": data,
-                "issues_found": len(data) if isinstance(data, list) else data.get("issues", []),
-                "passed": result.returncode == 0
-            }
-        except json.JSONDecodeError:
-            # Parse text output
-            return {
-                "raw_output": output,
-                "stderr": stderr if stderr else None,
-                "passed": result.returncode == 0
-            }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out"}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}"}
-    except Exception as e:
-        return {"error": str(e)}
+    # Try to parse as JSON first
+    try:
+        data = json.loads(output)
+        return {
+            "audit_results": data,
+            "issues_found": len(data) if isinstance(data, list) else data.get("issues", []),
+            "passed": passed
+        }
+    except json.JSONDecodeError:
+        return {"raw_output": output or None, "passed": passed}
 
 
-def get_plugins_list(cli_command: Optional[str] = None) -> Dict[str, Any]:
+def get_plugins_list(cli_command: Optional[CliCommand] = None) -> Dict[str, Any]:
     """Run openclaw plugins list to get active plugins only.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
 
     Returns:
         Dict with active plugins list and count
     """
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {"error": "CLI not found", "active_plugins": [], "count": 0}
-
-    cmd = [cli_command, "plugins", "list", "--json"]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0:
-            return {
-                "error": f"Command failed: {result.stderr}",
-                "active_plugins": [],
-                "count": 0
-            }
-
-        try:
-            data = json.loads(result.stdout)
-            all_plugins = data if isinstance(data, list) else data.get("plugins", [])
-
-            # Filter for active plugins only - exclude disabled ones
-            active_plugins = []
-            for plugin in all_plugins:
-                if not isinstance(plugin, dict):
-                    continue
-                # Skip if explicitly disabled
-                if plugin.get("enabled") == False:
-                    continue
-                if plugin.get("status") == "disabled":
-                    continue
-                if plugin.get("disabled") == True:
-                    continue
-                if plugin.get("active") == False:
-                    continue
-                active_plugins.append(plugin)
-
-            return {
-                "active_plugins": active_plugins,
-                "count": len(active_plugins),
-                "total": len(all_plugins)
-            }
-        except json.JSONDecodeError:
-            lines = result.stdout.strip().split("\n")
-            plugins = [{"raw": line.strip()} for line in lines if line.strip()]
-            return {
-                "active_plugins": plugins,
-                "count": len(plugins),
-                "raw_output": result.stdout.strip()
-            }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out", "active_plugins": [], "count": 0}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}", "active_plugins": [], "count": 0}
-    except Exception as e:
+        stdout = _run_cli(cli_command, "plugins", "list", "--json")
+    except CliExecError as e:
         return {"error": str(e), "active_plugins": [], "count": 0}
 
+    try:
+        data = json.loads(stdout)
+        all_plugins = data if isinstance(data, list) else data.get("plugins", [])
 
-def get_channels_list(cli_command: Optional[str] = None) -> Dict[str, Any]:
+        # Filter for active plugins only - exclude disabled ones
+        active_plugins = []
+        for plugin in all_plugins:
+            if not isinstance(plugin, dict):
+                continue
+            # Skip if explicitly disabled
+            if plugin.get("enabled") is False:
+                continue
+            if plugin.get("status") == "disabled":
+                continue
+            if plugin.get("disabled") is True:
+                continue
+            if plugin.get("active") is False:
+                continue
+            active_plugins.append(plugin)
+
+        return {
+            "active_plugins": active_plugins,
+            "count": len(active_plugins),
+            "total": len(all_plugins)
+        }
+    except json.JSONDecodeError:
+        lines = stdout.strip().split("\n")
+        plugins = [{"raw": line.strip()} for line in lines if line.strip()]
+        return {
+            "active_plugins": plugins,
+            "count": len(plugins),
+            "raw_output": stdout.strip()
+        }
+
+
+def get_channels_list(cli_command: Optional[CliCommand] = None) -> Dict[str, Any]:
     """Run openclaw channels list to get configured channels/integrations.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
-
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
     Returns:
         Dict with channels list and count
     """
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {"error": "CLI not found", "channels": [], "count": 0}
-
-    cmd = [cli_command, "channels", "list"]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0:
-            return {
-                "error": f"Command failed: {result.stderr}",
-                "channels": [],
-                "count": 0
-            }
-
-        try:
-            data = json.loads(result.stdout)
-            channels = data if isinstance(data, list) else data.get("channels", [])
-            return {
-                "channels": channels,
-                "count": len(channels) if isinstance(channels, list) else 0
-            }
-        except json.JSONDecodeError:
-            lines = result.stdout.strip().split("\n")
-            channels = [{"raw": line.strip()} for line in lines if line.strip()]
-            return {
-                "channels": channels,
-                "count": len(channels),
-                "raw_output": result.stdout.strip()
-            }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out", "channels": [], "count": 0}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}", "channels": [], "count": 0}
-    except Exception as e:
+        stdout = _run_cli(cli_command, "channels", "list")
+    except CliExecError as e:
         return {"error": str(e), "channels": [], "count": 0}
 
+    try:
+        data = json.loads(stdout)
+        channels = data if isinstance(data, list) else data.get("channels", [])
+        return {"channels": channels, "count": len(channels) if isinstance(channels, list) else 0}
+    except json.JSONDecodeError:
+        lines = stdout.strip().split("\n")
+        channels = [{"raw": line.strip()} for line in lines if line.strip()]
+        return {
+            "channels": channels,
+            "count": len(channels),
+            "raw_output": stdout.strip()
+        }
 
-def get_nodes_list(cli_command: Optional[str] = None) -> Dict[str, Any]:
+
+def get_nodes_list(cli_command: Optional[CliCommand] = None) -> Dict[str, Any]:
     """Run openclaw nodes list to get connected/paired nodes.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
 
     Returns:
         Dict with nodes list and count
     """
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {"error": "CLI not found", "nodes": [], "count": 0}
-
-    cmd = [cli_command, "nodes", "list"]
-
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if result.returncode != 0:
-            return {
-                "error": f"Command failed: {result.stderr}",
-                "nodes": [],
-                "count": 0
-            }
-
-        try:
-            data = json.loads(result.stdout)
-            nodes = data if isinstance(data, list) else data.get("nodes", [])
-            return {
-                "nodes": nodes,
-                "count": len(nodes) if isinstance(nodes, list) else 0
-            }
-        except json.JSONDecodeError:
-            lines = result.stdout.strip().split("\n")
-            nodes = [{"raw": line.strip()} for line in lines if line.strip()]
-            return {
-                "nodes": nodes,
-                "count": len(nodes),
-                "raw_output": result.stdout.strip()
-            }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out", "nodes": [], "count": 0}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}", "nodes": [], "count": 0}
-    except Exception as e:
+        stdout = _run_cli(cli_command, "nodes", "list")
+    except CliExecError as e:
         return {"error": str(e), "nodes": [], "count": 0}
 
+    try:
+        data = json.loads(stdout)
+        nodes = data if isinstance(data, list) else data.get("nodes", [])
+        return {"nodes": nodes, "count": len(nodes) if isinstance(nodes, list) else 0}
+    except json.JSONDecodeError:
+        lines = stdout.strip().split("\n")
+        nodes = [{"raw": line.strip()} for line in lines if line.strip()]
+        return {
+            "nodes": nodes,
+            "count": len(nodes),
+            "raw_output": stdout.strip()
+        }
 
-def get_models_status(cli_command: Optional[str] = None) -> Dict[str, Any]:
+
+def get_models_status(cli_command: Optional[CliCommand] = None) -> Dict[str, Any]:
     """Run openclaw models status to get authentication and model status.
 
     Args:
-        cli_command: The CLI command/path to use. If None, auto-detects it.
-
+        cli_command: CLI base command as list of string parts. If None, auto-detects.
     Returns:
         Dict with models status including auth info
     """
-    if cli_command is None:
-        cli_command = _compat.find_openclaw_binary("openclaw")
-        if cli_command is None:
-            return {"error": "CLI not found"}
-
-    cmd = [cli_command, "models", "status"]
+    try:
+        stdout = _run_cli(cli_command, "models", "status")
+    except CliExecError as e:
+        return {"error": str(e)}
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        output = result.stdout.strip()
-
-        try:
-            data = json.loads(output)
-            return {
-                "models_status": data,
-                "has_auth": True
-            }
-        except json.JSONDecodeError:
-            return {
-                "raw_output": output,
-                "passed": result.returncode == 0
-            }
-
-    except subprocess.TimeoutExpired:
-        return {"error": "Command timed out"}
-    except FileNotFoundError:
-        return {"error": f"CLI not found: {cli_command}"}
-    except Exception as e:
-        return {"error": str(e)}
+        return {"models_status": json.loads(stdout), "has_auth": True}
+    except json.JSONDecodeError:
+        return {"raw_output": stdout.strip(), "passed": True}
 
 
 def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
@@ -510,7 +376,7 @@ def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
     tool_calls.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 
     # Build tools usage summary
-    tools_summary = {}
+    tools_summary: Dict[str, int] = {}
     for tc in tool_calls:
         name = tc.get("tool_name", "unknown")
         tools_summary[name] = tools_summary.get(name, 0) + 1
@@ -519,7 +385,7 @@ def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
     tools_summary = dict(sorted(tools_summary.items(), key=lambda x: x[1], reverse=True))
 
     # Build apps usage summary
-    apps_summary = {}
+    apps_summary: Dict[str, int] = {}
     for tc in tool_calls:
         for app in tc.get("apps_detected", []):
             apps_summary[app] = apps_summary.get(app, 0) + 1
@@ -557,10 +423,9 @@ def send_report(report_data: Dict[str, Any], api_key: str) -> Dict[str, Any]:
     }
 
     try:
-        data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             API_ENDPOINT,
-            data=data,
+            data=json.dumps(payload).encode("utf-8"),
             headers=headers,
             method="POST"
         )
@@ -636,9 +501,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Step 1: Find .openclaw folder
     openclaw_path = find_openclaw_folder()
-
     if openclaw_path is None:
         result = {
             "error": ".openclaw folder not found",
@@ -650,32 +513,18 @@ def main():
         print(json.dumps(result, indent=None if args.compact else 2))
         sys.exit(1)
 
-    # Step 2: Get active skills
-    skills_result = get_active_skills(args.cli)
-
-    # Step 3: Scan session logs
+    # Collect scan data
+    cli = args.cli.split() if args.cli else _compat.find_openclaw_binary("openclaw")
+    cli_str = " ".join(cli) if cli else None
+    skills_result = get_active_skills(cli)
     logs_result = scan_session_logs(openclaw_path)
-
-    # Step 4: Get system info
     system_info = get_system_info()
-
-    # Step 5: Get cron jobs
-    cron_result = get_cron_jobs(args.cli)
-
-    # Step 6: Get security audit (CISO critical)
-    security_result = get_security_audit(args.cli)
-
-    # Step 7: Get plugins list (attack surface)
-    plugins_result = get_plugins_list(args.cli)
-
-    # Step 8: Get channels list (external integrations)
-    channels_result = get_channels_list(args.cli)
-
-    # Step 9: Get nodes list (remote connections)
-    nodes_result = get_nodes_list(args.cli)
-
-    # Step 10: Get models status (auth posture)
-    models_result = get_models_status(args.cli)
+    cron_result = get_cron_jobs(cli)
+    security_result = get_security_audit(cli)  # CISO-critical
+    plugins_result = get_plugins_list(cli)  # attack surface
+    channels_result = get_channels_list(cli)  # external integrations
+    nodes_result = get_nodes_list(cli)  # remote connections
+    models_result = get_models_status(cli)  # auth posture
 
     # Limit tool calls in output
     logs_result["tool_calls"] = logs_result["tool_calls"][:args.limit]
@@ -711,6 +560,7 @@ def main():
     if args.full:
         result = {
             "scan_timestamp": datetime.now().isoformat(),
+            "cli_command": cli_str,
             "system_info": system_info,
             "openclaw_path": str(openclaw_path),
             "summary": summary,
@@ -727,6 +577,7 @@ def main():
     else:
         result = {
             "scan_timestamp": datetime.now().isoformat(),
+            "cli_command": cli_str,
             "system_info": system_info,
             "summary": summary
         }

@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from structures import ProcessInfo, SystemInfo, ToolPaths
+from structures import CliCommand, ProcessInfo, SystemInfo, ToolPaths
 
 
 def dedupe_apps(apps: List[str]) -> List[str]:
@@ -131,33 +131,27 @@ def get_base_tool_paths(tool_name: str) -> ToolPaths:
 
 
 def find_openclaw_binary_common(cli_name: str = "openclaw", 
-                                extra_paths: Optional[List[Path]] = None) -> Optional[str]:
-    """
-    Find the OpenClaw CLI binary - common implementation.
+                                extra_paths: Optional[List[Path]] = None) -> Optional[CliCommand]:
+    """Find the OpenClaw CLI binary - common implementation.
     
-    Platform-specific implementations can call this and add their own paths
-    via extra_paths parameter (checked before fallbacks).
+    Platform-specific implementations call this with their own extra_paths.
     
-    Args:
-        cli_name: The CLI binary name (openclaw, moltbot, clawdbot)
-        extra_paths: Additional platform-specific paths to check
-        
     Returns:
-        Absolute path to the binary, or None if not found
+        Command as list (e.g. ["/usr/bin/openclaw"] or ["npx", "openclaw"]), or None
     """
     home = Path.home()
     
     # 1. Check PATH first (works if user configured correctly)
     path_result = shutil.which(cli_name)
     if path_result:
-        return path_result
+        return [path_result]
     
     # 2. npm global bin (most common install method)
     npm_prefix = run_cmd(["npm", "prefix", "-g"])
     if npm_prefix:
         npm_path = Path(npm_prefix) / "bin" / cli_name
         if npm_path.exists():
-            return str(npm_path)
+            return [str(npm_path)]
     
     # 3. pnpm global root (alternative package manager)
     pnpm_root = run_cmd(["pnpm", "root", "-g"])
@@ -165,7 +159,7 @@ def find_openclaw_binary_common(cli_name: str = "openclaw",
         # pnpm root -g returns .../node_modules, bin is at ../bin
         pnpm_path = Path(pnpm_root).parent / "bin" / cli_name
         if pnpm_path.exists():
-            return str(pnpm_path)
+            return [str(pnpm_path)]
     
     # 4. Git source install (common dev setup)
     #    Default git dir per installer docs: ~/openclaw
@@ -175,13 +169,13 @@ def find_openclaw_binary_common(cli_name: str = "openclaw",
     ]
     for p in git_paths:
         if p.exists():
-            return str(p)
+            return [str(p)]
     
     # 5. Platform-specific paths (passed by caller)
     if extra_paths:
         for p in extra_paths:
             if p.exists():
-                return str(p)
+                return [str(p)]
     
     # 6. Common fallback locations
     fallbacks = [
@@ -190,6 +184,12 @@ def find_openclaw_binary_common(cli_name: str = "openclaw",
     ]
     for p in fallbacks:
         if p.exists():
-            return str(p)
+            return [str(p)]
+    
+    # 7. npx fallback - verify package actually exists
+    if shutil.which("npx"):
+        result = run_cmd(["npx", cli_name, "--version"])
+        if result:
+            return ["npx", cli_name]
     
     return None

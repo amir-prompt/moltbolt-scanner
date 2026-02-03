@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .base import PlatformCompat, ProcessInfo, ToolPaths, UserInfo
+from structures import CliCommand
 from .common import (
     run_cmd, get_user_id, get_group_id,
     get_groups, get_uname, find_processes as _find_processes,
@@ -67,7 +68,7 @@ class LinuxCompat(PlatformCompat):
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode == 0:
-                return [l for l in result.stdout.strip().split('\n') if l.strip()]
+                return [line for line in result.stdout.strip().split('\n') if line.strip()]
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
         return []
@@ -99,7 +100,7 @@ class LinuxCompat(PlatformCompat):
         # TODO: Implement if needed for native Linux or WSL2 Windows app detection
         return []
 
-    def find_openclaw_binary(self, cli_name: str = "openclaw") -> Optional[str]:
+    def find_openclaw_binary(self, cli_name: str = "openclaw") -> Optional[CliCommand]:
         """Find OpenClaw CLI binary (Linux-specific paths).
         
         Adds Linux-specific locations:

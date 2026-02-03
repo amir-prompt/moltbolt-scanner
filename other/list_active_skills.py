@@ -15,7 +15,6 @@ import socket
 import subprocess
 import sys
 from collections import Counter
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
@@ -200,7 +199,7 @@ def get_app_statistics(tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
     Returns:
         Dict containing app usage statistics
     """
-    app_counter = Counter()
+    app_counter: Counter[str] = Counter()
 
     for call in tool_calls:
         for app in call.get("apps", []):

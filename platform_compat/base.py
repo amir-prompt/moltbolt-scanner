@@ -10,9 +10,9 @@ For cross-platform stdlib, use directly:
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from structures import ProcessInfo, ToolPaths, UserInfo
+from structures import ProcessInfo, ToolPaths, UserInfo, CliCommand
 
-__all__ = ["PlatformCompat", "ProcessInfo", "ToolPaths", "UserInfo"]
+__all__ = ["PlatformCompat", "ProcessInfo", "ToolPaths", "UserInfo", "CliCommand"]
 
 
 class PlatformCompat(ABC):
@@ -96,7 +96,7 @@ class PlatformCompat(ABC):
         ...
 
     @abstractmethod
-    def find_openclaw_binary(self, cli_name: str = "openclaw") -> Optional[str]:
+    def find_openclaw_binary(self, cli_name: str = "openclaw") -> Optional[CliCommand]:
         """
         Find the OpenClaw CLI binary path.
         
@@ -107,11 +107,12 @@ class PlatformCompat(ABC):
             4. Git source install (~/openclaw/openclaw.mjs)
             5. Platform-specific locations (macOS app bundle, Nix store)
             6. Common fallback paths
+            7. npx fallback
         
         Args:
             cli_name: The CLI binary name (openclaw, moltbot, clawdbot)
             
         Returns:
-            Absolute path to the binary, or None if not found
+            Command as list (e.g. ["/usr/bin/openclaw"] or ["npx", "openclaw"]), or None
         """
         ...
