@@ -25,6 +25,25 @@ class UserInfo(TypedDict):
     local_hostname: Optional[str]    # macOS only, others: None
 
 
+class OsInfo(TypedDict):
+    """Operating system information."""
+    system: str      # e.g. "Darwin", "Linux", "Windows"
+    release: str     # e.g. "24.6.0"
+    version: str     # full version string
+    machine: str     # e.g. "arm64", "x86_64"
+
+
+class SystemInfo(TypedDict):
+    """System information for the host being scanned (used by openclaw_usage.py)."""
+    username: str       # e.g. "john"
+    home_dir: str       # e.g. "/Users/john"
+    current_dir: str    # current working directory
+    hostname: str       # machine hostname
+    os: OsInfo          # nested OS details
+    shell: str          # e.g. "/bin/zsh"
+    lang: str           # e.g. "en_US.UTF-8"
+
+
 class ProcessInfo(TypedDict):
     """Process info returned by find_processes()."""
     user: str           # process owner, "" if unavailable

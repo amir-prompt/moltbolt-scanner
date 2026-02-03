@@ -8,7 +8,7 @@ from typing import List, Optional
 from .base import PlatformCompat, ProcessInfo, ToolPaths, UserInfo
 from .common import (
     run_cmd, get_user_id, get_group_id,
-    get_groups, get_system_info, find_processes as _find_processes,
+    get_groups, get_uname, find_processes as _find_processes,
     get_base_tool_paths,
 )
 
@@ -36,7 +36,7 @@ class LinuxCompat(PlatformCompat):
             "full_name": full_name,
             "shell": os.environ.get("SHELL", "unknown"),
             "groups": get_groups(),
-            "system_info": get_system_info(),
+            "system_info": get_uname(),
             "computer_name": run_cmd(["hostname"]),
             "local_hostname": None,
         }
