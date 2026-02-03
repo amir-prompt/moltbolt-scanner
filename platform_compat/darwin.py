@@ -3,25 +3,16 @@
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import List, Optional
 
-from structures import CliToAppMapping
 from .base import PlatformCompat, ProcessInfo, ToolPaths, UserInfo
 from .common import (
     run_cmd, get_user_id, get_group_id,
     get_groups, get_uname, find_processes as _find_processes,
-    get_base_tool_paths, SHARED_CLI_TO_APP, dedupe_apps, match_cli_tools,
+    get_base_tool_paths, dedupe_apps, find_openclaw_binary_common,
 )
 
-
-# macOS-specific CLI tools that map to apps
-MACOS_CLI_TO_APP: CliToAppMapping = {
-    "memo": "Apple Notes",
-    "icalbuddy": "Calendar",
-    "remindctl": "Reminders",
-    "grizzly": "Bear Notes",
-    "safari": "Safari",
-}
 
 
 class DarwinCompat(PlatformCompat):
@@ -108,10 +99,30 @@ class DarwinCompat(PlatformCompat):
         app_path_pattern = r'/Applications/([^/]+)\.app'
         apps.extend(re.findall(app_path_pattern, command))
 
-        # Match macOS-specific CLIs
-        apps.extend(match_cli_tools(command, MACOS_CLI_TO_APP))
-
-        # Match shared/cross-platform CLIs
-        apps.extend(match_cli_tools(command, SHARED_CLI_TO_APP))
-
         return dedupe_apps(apps)
+
+    def find_openclaw_binary(self, cli_name: str = "openclaw") -> Optional[str]:
+        """Find OpenClaw CLI binary (macOS-specific paths).
+        
+        Adds macOS-specific locations:
+            - /Applications/OpenClaw.app/Contents/MacOS/openclaw (bundled app)
+            - /opt/homebrew/bin/openclaw (Homebrew on Apple Silicon)
+            - Nix store paths
+        """
+        # macOS-specific paths to check
+        macos_paths = [
+            # macOS app bundle (companion app bundles CLI)
+            Path("/Applications/OpenClaw.app/Contents/MacOS") / cli_name,
+            # Homebrew on Apple Silicon
+            Path("/opt/homebrew/bin") / cli_name,
+            # Homebrew on Intel
+            Path("/usr/local/bin") / cli_name,
+        ]
+        
+        # Nix: try to find via nix profile or run wrapper
+        # nix-openclaw puts it in the profile
+        nix_profile_bin = Path.home() / ".nix-profile" / "bin" / cli_name
+        if nix_profile_bin.exists():
+            macos_paths.insert(0, nix_profile_bin)
+        
+        return find_openclaw_binary_common(cli_name, extra_paths=macos_paths)

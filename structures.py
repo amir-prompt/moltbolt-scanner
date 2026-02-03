@@ -44,10 +44,6 @@ class SystemInfo(TypedDict):
     lang: str           # e.g. "en_US.UTF-8"
 
 
-# Type alias for CLI-to-app mappings (CLI command -> friendly app name)
-CliToAppMapping = Dict[str, str]
-
-
 class ProcessInfo(TypedDict):
     """Process info returned by find_processes()."""
     user: str           # process owner, "" if unavailable

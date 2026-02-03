@@ -2,34 +2,12 @@
 
 import os
 import platform
-import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from structures import CliToAppMapping, ProcessInfo, SystemInfo, ToolPaths
-
-
-# Shared CLI-to-app mappings (used by all platforms)
-# These CLI tools are cross-platform or have equivalents on all OSes
-SHARED_CLI_TO_APP: CliToAppMapping = {
-    "chrome": "Google Chrome",
-    "brave": "Brave Browser",
-    "firefox": "Firefox",
-    "edge": "Microsoft Edge",
-    "code": "VS Code",
-    "cursor": "Cursor",
-    "slack": "Slack",
-    "discord": "Discord",
-    "spotify": "Spotify",
-    "telegram": "Telegram",
-    "whatsapp": "WhatsApp",
-    "obsidian": "Obsidian",
-    "notion": "Notion",
-    "figma": "Figma",
-    "zoom": "Zoom",
-    "teams": "Microsoft Teams",
-}
+from structures import ProcessInfo, SystemInfo, ToolPaths
 
 
 def dedupe_apps(apps: List[str]) -> List[str]:
@@ -42,16 +20,6 @@ def dedupe_apps(apps: List[str]) -> List[str]:
             seen.add(app_lower)
             unique_apps.append(app)
     return unique_apps
-
-
-def match_cli_tools(command: str, cli_to_app: CliToAppMapping) -> List[str]:
-    """Match CLI tools in command using word boundaries."""
-    apps: List[str] = []
-    command_lower = command.lower()
-    for cli, app in cli_to_app.items():
-        if re.search(rf'\b{cli}\b', command_lower):
-            apps.append(app)
-    return apps
 
 
 def get_system_info() -> SystemInfo:
@@ -160,3 +128,68 @@ def get_base_tool_paths(tool_name: str) -> ToolPaths:
             f"/tmp/{tool_name}-gateway.log",
         ]
     }
+
+
+def find_openclaw_binary_common(cli_name: str = "openclaw", 
+                                extra_paths: Optional[List[Path]] = None) -> Optional[str]:
+    """
+    Find the OpenClaw CLI binary - common implementation.
+    
+    Platform-specific implementations can call this and add their own paths
+    via extra_paths parameter (checked before fallbacks).
+    
+    Args:
+        cli_name: The CLI binary name (openclaw, moltbot, clawdbot)
+        extra_paths: Additional platform-specific paths to check
+        
+    Returns:
+        Absolute path to the binary, or None if not found
+    """
+    home = Path.home()
+    
+    # 1. Check PATH first (works if user configured correctly)
+    path_result = shutil.which(cli_name)
+    if path_result:
+        return path_result
+    
+    # 2. npm global bin (most common install method)
+    npm_prefix = run_cmd(["npm", "prefix", "-g"])
+    if npm_prefix:
+        npm_path = Path(npm_prefix) / "bin" / cli_name
+        if npm_path.exists():
+            return str(npm_path)
+    
+    # 3. pnpm global root (alternative package manager)
+    pnpm_root = run_cmd(["pnpm", "root", "-g"])
+    if pnpm_root:
+        # pnpm root -g returns .../node_modules, bin is at ../bin
+        pnpm_path = Path(pnpm_root).parent / "bin" / cli_name
+        if pnpm_path.exists():
+            return str(pnpm_path)
+    
+    # 4. Git source install (common dev setup)
+    #    Default git dir per installer docs: ~/openclaw
+    git_paths = [
+        home / "openclaw" / "openclaw.mjs",
+        home / cli_name / f"{cli_name}.mjs",
+    ]
+    for p in git_paths:
+        if p.exists():
+            return str(p)
+    
+    # 5. Platform-specific paths (passed by caller)
+    if extra_paths:
+        for p in extra_paths:
+            if p.exists():
+                return str(p)
+    
+    # 6. Common fallback locations
+    fallbacks = [
+        home / ".npm-global" / "bin" / cli_name,
+        Path("/usr/local/bin") / cli_name,
+    ]
+    for p in fallbacks:
+        if p.exists():
+            return str(p)
+    
+    return None

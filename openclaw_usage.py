@@ -14,12 +14,21 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TypedDict
 
 from platform_compat.common import get_system_info
 from platform_compat import compat as _compat
 
 API_ENDPOINT = "https://openclawmang.vercel.app/api/reports"
+
+
+class SkillsResult(TypedDict, total=False):
+    """Return type for get_active_skills()."""
+    active_skills: List[Dict[str, Any]]  # Skill structure from CLI
+    count: int
+    total: int           # Only on success
+    error: str           # Only on error
+    cli_searched: bool   # Only when auto-detection was attempted
 
 
 def find_openclaw_folder() -> Optional[Path]:
@@ -36,15 +45,26 @@ def find_openclaw_folder() -> Optional[Path]:
     return None
 
 
-def get_active_skills(cli_command: str = "openclaw") -> Dict[str, Any]:
+def get_active_skills(cli_command: Optional[str] = None) -> SkillsResult:
     """Run openclaw skills list and filter only active skills.
 
     Args:
-        cli_command: The CLI command to use (openclaw, moltbot, or clawdbot)
+        cli_command: The CLI command/path to use. If None, auto-detects via compat layer.
 
     Returns:
-        Dict with active skills list and counts
+        SkillsResult with active_skills list and counts (or error on failure)
     """
+    # Auto-detect CLI binary if not provided
+    if cli_command is None:
+        cli_command = _compat.find_openclaw_binary("openclaw")
+        if cli_command is None:
+            return {
+                "error": "OpenClaw CLI not found. Searched: PATH, npm global, pnpm, git source, platform-specific locations.",
+                "active_skills": [],
+                "count": 0,
+                "cli_searched": True
+            }
+    
     cmd = [cli_command, "skills", "list", "--json"]
 
     try:
@@ -251,8 +271,8 @@ def main():
     parser.add_argument(
         "--cli",
         type=str,
-        default="openclaw",
-        help="CLI command to use (openclaw, moltbot, clawdbot)"
+        default=None,
+        help="CLI command/path to use. If not provided, auto-detects (openclaw, moltbot, clawdbot)"
     )
     parser.add_argument(
         "--compact",

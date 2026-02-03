@@ -94,3 +94,24 @@ class PlatformCompat(ABC):
             List of app names found in the command (unique, order preserved)
         """
         ...
+
+    @abstractmethod
+    def find_openclaw_binary(self, cli_name: str = "openclaw") -> Optional[str]:
+        """
+        Find the OpenClaw CLI binary path.
+        
+        Searches in order:
+            1. PATH (shutil.which)
+            2. npm global prefix ($npm_prefix/bin/openclaw)
+            3. pnpm global root ($pnpm_root/../bin/openclaw)
+            4. Git source install (~/openclaw/openclaw.mjs)
+            5. Platform-specific locations (macOS app bundle, Nix store)
+            6. Common fallback paths
+        
+        Args:
+            cli_name: The CLI binary name (openclaw, moltbot, clawdbot)
+            
+        Returns:
+            Absolute path to the binary, or None if not found
+        """
+        ...
