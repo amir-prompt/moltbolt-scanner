@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-API_ENDPOINT = "https://openclawmang.vercel.app/api/reports"
+API_ENDPOINT = "https://oneclaw.prompt.security/api/reports"
 
 
 def find_openclaw_folder() -> Optional[Path]:
@@ -591,7 +591,8 @@ def send_report(report_data: Dict[str, Any], api_key: str) -> Dict[str, Any]:
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "OpenClaw-Scanner/1.0"
     }
 
     try:
