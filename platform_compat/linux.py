@@ -80,3 +80,20 @@ class LinuxCompat(PlatformCompat):
         value, unit = match.groups()
         unit_map = {'h': 'hours', 'm': 'minutes', 'd': 'days'}
         return f"{value} {unit_map.get(unit, 'hours')} ago"
+
+    def extract_app_names(self, command: str) -> List[str]:
+        """Extract app names from a command string.
+
+        Stub implementation - returns empty list.
+        
+        On native Linux, app detection patterns differ significantly from macOS.
+        On WSL2, detecting Windows apps would require different approaches.
+        
+        Args:
+            command: The command string to parse
+
+        Returns:
+            Empty list (not implemented for Linux/WSL2)
+        """
+        # TODO: Implement if needed for native Linux or WSL2 Windows app detection
+        return []

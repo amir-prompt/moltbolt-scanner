@@ -2,11 +2,56 @@
 
 import os
 import platform
+import re
 import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from structures import ProcessInfo, SystemInfo, ToolPaths
+from structures import CliToAppMapping, ProcessInfo, SystemInfo, ToolPaths
+
+
+# Shared CLI-to-app mappings (used by all platforms)
+# These CLI tools are cross-platform or have equivalents on all OSes
+SHARED_CLI_TO_APP: CliToAppMapping = {
+    "chrome": "Google Chrome",
+    "brave": "Brave Browser",
+    "firefox": "Firefox",
+    "edge": "Microsoft Edge",
+    "code": "VS Code",
+    "cursor": "Cursor",
+    "slack": "Slack",
+    "discord": "Discord",
+    "spotify": "Spotify",
+    "telegram": "Telegram",
+    "whatsapp": "WhatsApp",
+    "obsidian": "Obsidian",
+    "notion": "Notion",
+    "figma": "Figma",
+    "zoom": "Zoom",
+    "teams": "Microsoft Teams",
+}
+
+
+def dedupe_apps(apps: List[str]) -> List[str]:
+    """Remove duplicates while preserving order (case-insensitive)."""
+    seen: set[str] = set()
+    unique_apps: List[str] = []
+    for app in apps:
+        app_lower = app.lower()
+        if app_lower not in seen:
+            seen.add(app_lower)
+            unique_apps.append(app)
+    return unique_apps
+
+
+def match_cli_tools(command: str, cli_to_app: CliToAppMapping) -> List[str]:
+    """Match CLI tools in command using word boundaries."""
+    apps: List[str] = []
+    command_lower = command.lower()
+    for cli, app in cli_to_app.items():
+        if re.search(rf'\b{cli}\b', command_lower):
+            apps.append(app)
+    return apps
 
 
 def get_system_info() -> SystemInfo:

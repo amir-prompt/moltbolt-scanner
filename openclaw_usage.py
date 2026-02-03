@@ -7,7 +7,7 @@ Outputs JSON with all collected data.
 
 import json
 import os
-import re
+import platform
 import subprocess
 import sys
 import urllib.request
@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from platform_compat.common import get_system_info
+from platform_compat import compat as _compat
 
 API_ENDPOINT = "https://openclawmang.vercel.app/api/reports"
 
@@ -86,75 +87,6 @@ def get_active_skills(cli_command: str = "openclaw") -> Dict[str, Any]:
         return {"error": str(e), "active_skills": [], "count": 0}
 
 
-def extract_app_names(command: str) -> List[str]:
-    """Extract app names from a command string.
-
-    Args:
-        command: The command string to parse
-
-    Returns:
-        List of app names found in the command
-    """
-    apps = []
-
-    # Pattern: osascript -e 'tell application "AppName"'
-    osascript_pattern = r'tell application ["\']([^"\']+)["\']'
-    apps.extend(re.findall(osascript_pattern, command, re.IGNORECASE))
-
-    # Pattern: open -a AppName or open -a "App Name"
-    open_pattern = r'open\s+-a\s+["\']?([^"\';\s]+(?:\s+[^"\';\s]+)*)["\']?'
-    apps.extend(re.findall(open_pattern, command, re.IGNORECASE))
-
-    # Pattern: killall "AppName" or killall AppName
-    killall_pattern = r'killall\s+["\']?([^"\';\s]+)["\']?'
-    apps.extend(re.findall(killall_pattern, command, re.IGNORECASE))
-
-    # Pattern: /Applications/AppName.app
-    app_path_pattern = r'/Applications/([^/]+)\.app'
-    apps.extend(re.findall(app_path_pattern, command))
-
-    # CLI tools that map to apps
-    cli_to_app = {
-        "memo": "Apple Notes",
-        "icalbuddy": "Calendar",
-        "remindctl": "Reminders",
-        "grizzly": "Bear Notes",
-        "chrome": "Google Chrome",
-        "brave": "Brave Browser",
-        "firefox": "Firefox",
-        "safari": "Safari",
-        "edge": "Microsoft Edge",
-        "code": "VS Code",
-        "cursor": "Cursor",
-        "slack": "Slack",
-        "discord": "Discord",
-        "spotify": "Spotify",
-        "telegram": "Telegram",
-        "whatsapp": "WhatsApp",
-        "obsidian": "Obsidian",
-        "notion": "Notion",
-        "figma": "Figma",
-        "zoom": "Zoom",
-        "teams": "Microsoft Teams",
-    }
-
-    command_lower = command.lower()
-    for cli, app in cli_to_app.items():
-        if re.search(rf'\b{cli}\b', command_lower):
-            apps.append(app)
-
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_apps = []
-    for app in apps:
-        app_lower = app.lower()
-        if app_lower not in seen:
-            seen.add(app_lower)
-            unique_apps.append(app)
-
-    return unique_apps
-
-
 def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
     """Scan session logs and extract tools and apps used.
 
@@ -197,7 +129,7 @@ def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
                             if isinstance(item, dict) and item.get("type") == "toolCall":
                                 arguments = item.get("arguments", {})
                                 command = arguments.get("command", "")
-                                apps = extract_app_names(command) if command else []
+                                apps = _compat.extract_app_names(command) if command else []
 
                                 tool_calls.append({
                                     "tool_name": item.get("name"),

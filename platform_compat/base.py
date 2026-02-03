@@ -74,3 +74,23 @@ class PlatformCompat(ABC):
             Log lines, newest last. Empty if unsupported/error.
         """
         return []
+
+    @abstractmethod
+    def extract_app_names(self, command: str) -> List[str]:
+        """
+        Extract application names from a command string.
+        
+        Platform-specific patterns:
+            - macOS: osascript, open -a, killall, /Applications/*.app
+            - Linux: xdg-open, gtk-launch, snap run, flatpak run, etc.
+            - Windows: Start-Process, shell:AppsFolder, etc.
+        
+        Also maps common CLI tools to their app names (chrome -> Google Chrome).
+        
+        Args:
+            command: The command string to parse
+            
+        Returns:
+            List of app names found in the command (unique, order preserved)
+        """
+        ...

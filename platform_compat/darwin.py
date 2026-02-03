@@ -1,15 +1,27 @@
 """macOS (Darwin) implementation."""
 
 import os
+import re
 import subprocess
 from typing import List, Optional
 
+from structures import CliToAppMapping
 from .base import PlatformCompat, ProcessInfo, ToolPaths, UserInfo
 from .common import (
     run_cmd, get_user_id, get_group_id,
     get_groups, get_uname, find_processes as _find_processes,
-    get_base_tool_paths,
+    get_base_tool_paths, SHARED_CLI_TO_APP, dedupe_apps, match_cli_tools,
 )
+
+
+# macOS-specific CLI tools that map to apps
+MACOS_CLI_TO_APP: CliToAppMapping = {
+    "memo": "Apple Notes",
+    "icalbuddy": "Calendar",
+    "remindctl": "Reminders",
+    "grizzly": "Bear Notes",
+    "safari": "Safari",
+}
 
 
 class DarwinCompat(PlatformCompat):
@@ -68,3 +80,38 @@ class DarwinCompat(PlatformCompat):
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
         return []
+
+    def extract_app_names(self, command: str) -> List[str]:
+        """Extract app names from a command string (macOS-specific patterns).
+
+        Args:
+            command: The command string to parse
+
+        Returns:
+            List of app names found in the command
+        """
+        apps: List[str] = []
+
+        # Pattern: osascript -e 'tell application "AppName"'
+        osascript_pattern = r'tell application ["\']([^"\']+)["\']'
+        apps.extend(re.findall(osascript_pattern, command, re.IGNORECASE))
+
+        # Pattern: open -a AppName or open -a "App Name"
+        open_pattern = r'open\s+-a\s+["\']?([^"\';\s]+(?:\s+[^"\';\s]+)*)["\']?'
+        apps.extend(re.findall(open_pattern, command, re.IGNORECASE))
+
+        # Pattern: killall "AppName" or killall AppName
+        killall_pattern = r'killall\s+["\']?([^"\';\s]+)["\']?'
+        apps.extend(re.findall(killall_pattern, command, re.IGNORECASE))
+
+        # Pattern: /Applications/AppName.app
+        app_path_pattern = r'/Applications/([^/]+)\.app'
+        apps.extend(re.findall(app_path_pattern, command))
+
+        # Match macOS-specific CLIs
+        apps.extend(match_cli_tools(command, MACOS_CLI_TO_APP))
+
+        # Match shared/cross-platform CLIs
+        apps.extend(match_cli_tools(command, SHARED_CLI_TO_APP))
+
+        return dedupe_apps(apps)
