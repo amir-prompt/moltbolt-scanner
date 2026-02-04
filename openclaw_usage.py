@@ -8,6 +8,7 @@ Outputs JSON with all collected data.
 import json
 import os
 import platform
+import ssl
 import subprocess
 import sys
 import urllib.request
@@ -19,7 +20,38 @@ from typing import Dict, List, Any, Optional
 from platform_compat.common import get_system_info
 from platform_compat import compat as _compat
 
-API_ENDPOINT = "https://openclawmang.vercel.app/api/reports"
+API_ENDPOINT = "https://oneclaw.prompt.security/api/reports"
+
+
+def create_ssl_context() -> ssl.SSLContext:
+    """Create an SSL context with proper certificate handling.
+
+    Returns:
+        SSL context configured for HTTPS requests
+    """
+    # Try to use certifi package if available (most reliable)
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+
+    # On macOS, try to use the system certificates
+    if platform.system() == "Darwin":
+        # Try the common macOS certificate locations
+        cert_paths = [
+            "/etc/ssl/cert.pem",
+            "/usr/local/etc/openssl/cert.pem",
+            "/usr/local/etc/openssl@1.1/cert.pem",
+            "/opt/homebrew/etc/openssl/cert.pem",
+            "/opt/homebrew/etc/openssl@3/cert.pem",
+        ]
+        for cert_path in cert_paths:
+            if os.path.exists(cert_path):
+                return ssl.create_default_context(cafile=cert_path)
+
+    # Fall back to default context
+    return ssl.create_default_context()
 
 
 def find_openclaw_folder() -> Optional[Path]:
@@ -175,12 +207,13 @@ def scan_session_logs(openclaw_path: Path) -> Dict[str, Any]:
     }
 
 
-def send_report(report_data: Dict[str, Any], api_key: str) -> Dict[str, Any]:
+def send_report(report_data: Dict[str, Any], api_key: str, verify_ssl: bool = True) -> Dict[str, Any]:
     """Send scan report to the API endpoint.
 
     Args:
         report_data: The scan report to send
         api_key: API key for authorization
+        verify_ssl: Whether to verify SSL certificates
 
     Returns:
         Dict with success status and response or error message
@@ -190,7 +223,8 @@ def send_report(report_data: Dict[str, Any], api_key: str) -> Dict[str, Any]:
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "OpenClawScanner/1.0"
     }
 
     try:
@@ -202,7 +236,13 @@ def send_report(report_data: Dict[str, Any], api_key: str) -> Dict[str, Any]:
             method="POST"
         )
 
-        with urllib.request.urlopen(req, timeout=30) as response:
+        if verify_ssl:
+            ssl_context = create_ssl_context()
+        else:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=30, context=ssl_context) as response:
             response_body = response.read().decode("utf-8")
             return {
                 "success": True,
@@ -270,6 +310,11 @@ def main():
         default=50,
         help="Limit number of recent tool calls to include in full output (default: 50)"
     )
+    parser.add_argument(
+        "--no-ssl-verify",
+        action="store_true",
+        help="Disable SSL certificate verification (use only if behind a corporate proxy)"
+    )
 
     args = parser.parse_args()
 
@@ -334,7 +379,7 @@ def main():
 
     # Send report to API if api-key is provided
     if args.api_key:
-        api_result = send_report(result, args.api_key)
+        api_result = send_report(result, args.api_key, verify_ssl=not args.no_ssl_verify)
         result["api_report"] = api_result
 
     # Output JSON
