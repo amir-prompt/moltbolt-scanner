@@ -48,7 +48,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --name moltbolt-scanner-${{ matrix.name }} \
+          pyinstaller --onefile --name openclaw-scanner-${{ matrix.name }} \
             --hidden-import platform_compat.darwin \
             --hidden-import platform_compat.linux \
             --hidden-import platform_compat.common \
@@ -57,4 +57,4 @@ jobs:
       - name: Upload executable to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/moltbolt-scanner-${{ matrix.name }}*
+          files: dist/openclaw-scanner-${{ matrix.name }}*

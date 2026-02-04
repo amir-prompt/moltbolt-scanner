@@ -1,5 +1,4 @@
-"""
-Shared data structures for moltbolt-scanner.
+"""Shared data structures for openclaw-scanner.
 
 All TypedDicts used across installation_tracker.py and platform_compat/.
 """
